@@ -76,7 +76,6 @@ impl mdf::MDFFile for MDF3 {
     }
     fn read_channel(&self, datagroup: usize, channel_grp: usize, channel: usize) -> Vec<Record> {
         let channel_group = &self.channel_groups[channel_grp];
-        // let data_length = channel_group.data_length();
         let channels = channel_group
             .first_channel(&self.file, self.little_endian)
             .list(&self.file, self.little_endian);
@@ -84,14 +83,8 @@ impl mdf::MDFFile for MDF3 {
         let cn = &channels[channel];
 
         let data = dg.read_data(&self.file, self.little_endian, channel_group);
-        // &self.file[dg.data_location() as usize..(dg.data_location() as usize + data_length)];
-
-        println!("Record Number: {}", channel_group.record_number());
 
         let mut data_blocks: Vec<&[u8]> = vec![&[0_u8]; channel_group.record_number()];
-        // let mut data_blocks = Vec::new();
-
-        println!("Vec len: {}", data_blocks.len());
 
         for (i, db) in data_blocks.iter_mut().enumerate() {
             *db = &data[(i * channel_group.record_size())..((i + 1) * channel_group.record_size())];
@@ -120,65 +113,6 @@ impl mdf::MDFFile for MDF3 {
 
         extracted_data
     }
-
-    // fn read_channel(&self, datagroup: usize, channel_grp: usize, channel: usize) -> Vec<Record> {
-
-    //     let little_endian = true;
-
-    //     let channels: Vec<Cnblock> = self.channel_groups[channel_grp].channels(&self.file, little_endian);
-    //     let data_length = (self.channel_groups[channel_grp].record_number
-    //         * self.channel_groups[channel_grp].record_size as u32)
-    //         as usize;
-    //     let data = &self.file[self.data_groups[datagroup].first_channel_group(&self.file, little_endian)
-    //         ..(self.data_groups[datagroup]..first_channel_group(&self.file, little_endian) + data_length)];
-
-    //     println!(
-    //         "Record Number: {}",
-    //         self.channel_groups[channel_grp].record_number
-    //     );
-
-    //     let mut data_blocks: Vec<&[u8]> =
-    //         vec![&[0]; self.channel_groups[channel_grp].record_number as usize];
-    //     // let mut data_blocks = Vec::with_capacity(self.channel_groups[channel_grp].record_number as usize);
-    //     println!("Vec len: {}", data_blocks.len());
-
-    //     for (i, db) in data_blocks.iter_mut().enumerate() {
-    //         *db = &data[(i * self.channel_groups[channel_grp].record_size as usize) as usize
-    //             ..((i + 1) * self.channel_groups[channel_grp].record_size as usize) as usize];
-    //     }
-    //     // for i in 0..self.channel_groups[channel_grp].record_number {
-    //     //     data_blocks.push(
-    //     //         &data[(i * self.channel_groups[channel_grp].record_size as u32) as usize
-    //     //             ..((i + 1) * self.channel_groups[channel_grp].record_size as u32) as usize],
-    //     //     );
-    //     // }
-
-    //     let byte_offset = (self.channels[channel].start_offset / 8) as usize;
-    //     let _bit_offset = self.channels[channel].start_offset % 8;
-
-    //     let mut records =
-    //         Vec::with_capacity(self.channel_groups[channel_grp].record_number as usize);
-    //     let mut pos = 0_usize;
-    //     for _i in 0..self.channel_groups[channel_grp].record_number {
-    //         records.push(&data[pos..pos + self.channel_groups[channel_grp].record_size as usize]);
-    //         pos += self.channel_groups[channel_grp].record_size as usize;
-    //     }
-
-    //     let mut raw_data =
-    //         Vec::with_capacity(self.channel_groups[channel_grp].record_number as usize);
-    //     let end = byte_offset + channels[channel].data_type.len();
-    //     for rec in &records {
-    //         raw_data.push(&rec[byte_offset..end])
-    //     }
-
-    //     let mut extracted_data =
-    //         Vec::with_capacity(self.channel_groups[channel_grp].record_number as usize);
-    //     for raw in raw_data {
-    //         extracted_data.push(Record::new(raw, channels[channel].data_type));
-    //     }
-
-    //     extracted_data
-    // }
 
     fn new(filepath: &str) -> Self {
         let mut file = File::open(filepath).expect("Could not read file");
@@ -240,41 +174,14 @@ impl mdf::MDFFile for MDF3 {
             let channel_groups = first_channel_group.list(&self.file, little_endian);
 
             for cg in channel_groups {
-                // let first_channel = cg.first_channel(&self.file, little_endian);
-                // let channels = first_channel.list(&self.file, little_endian);
+                let first_channel = cg.first_channel(&self.file, little_endian);
+                let channels = first_channel.list(&self.file, little_endian);
 
-                println!("Channel Group: {}", cg.comment(&self.file, little_endian));
+                for cn in channels {
+                    let _ = cn.name(&self.file, little_endian);
+                }
             }
         }
-
-        // let mut next_dg = hd_block.data_group_block;
-
-        // while next_dg != 0 {
-        //     let (_pos, dg_block) = Dgblock::read(&self.file, next_dg as usize, little_endian);
-        //     next_dg = dg_block.next;
-        //     let mut next_cg = dg_block.first;
-
-        //     dg.push(dg_block);
-
-        //     while next_cg != 0 {
-        //         let (_pos, cg_block) = Cgblock::read(&self.file, next_cg as usize, little_endian);
-        //         next_cg = cg_block.next;
-        //         let mut next_cn = cg_block.first;
-        //         cg.push(cg_block);
-
-        //         println!("Channel Group: {}", cg_block.comment);
-
-        //         while next_cn != 0 {
-        //             let (_pos, cn_block) =
-        //                 Cnblock::read(&self.file, next_cn as usize, little_endian);
-        //             next_cn = cn_block.next;
-
-        //             ch.push(cn_block);
-        //         }
-        //     }
-        // }
-
-        // (ch, cg, dg);
     }
 
     fn read(&self, datagroup: usize, channel_grp: usize, channel: usize) -> signal::Signal {
@@ -283,7 +190,6 @@ impl mdf::MDFFile for MDF3 {
             Ok(x) => x,
             Err(e) => panic!("{}", e),
         };
-        println!("Time Channel: {}", time_channel);
         let time = self.read_channel(datagroup, channel_grp, time_channel);
         let some = self.read_channel(datagroup, channel_grp, channel);
 

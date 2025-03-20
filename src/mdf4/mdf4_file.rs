@@ -108,14 +108,8 @@ impl MDFFile for MDF4 {
         let cn = &channels[channel];
 
         let data = dg.read_data(&self.file, self.little_endian);
-        // &self.file[dg.data_location() as usize..(dg.data_location() as usize + data_length)];
-
-        println!("Record Number: {}", channel_group.record_number());
 
         let mut data_blocks: Vec<&[u8]> = vec![&[0_u8]; channel_group.record_number()];
-        // let mut data_blocks = Vec::new();
-
-        println!("Vec len: {}", data_blocks.len());
 
         for (i, db) in data_blocks.iter_mut().enumerate() {
             *db = &data[(i * channel_group.record_size())..((i + 1) * channel_group.record_size())];
@@ -225,10 +219,10 @@ impl MDFFile for MDF4 {
                 let first_cn = cg.first(&self.file, little_endian);
                 let channels = first_cn.list(&self.file, little_endian);
 
-                println!("Channel Group: {}", cg.comment(&self.file, little_endian));
+                let _ = cg.comment(&self.file, little_endian);
 
                 for cn in channels {
-                    println!("Channel: {}", cn.comment(&self.file, little_endian));
+                    let _ = cn.comment(&self.file, little_endian);
                 }
             }
         }
@@ -241,7 +235,6 @@ impl MDFFile for MDF4 {
             Ok(x) => x,
             Err(e) => panic!("{}", e),
         };
-        println!("Time Channel: {}", time_channel);
         let time = self.read_channel(datagroup, channel_grp, time_channel);
         let some = self.read_channel(datagroup, channel_grp, channel);
 
