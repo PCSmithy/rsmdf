@@ -142,7 +142,7 @@ impl Cnblock {
 impl Block for Cnblock {
     fn new() -> Self {
         Cnblock {
-            header: BlockHeader::create("##CN", 50, 0),
+            header: BlockHeader::new(b"##CN"),
             cn_cn_next: 0,
             cn_composition: 0,
             cn_tx_name: 0,
@@ -174,7 +174,7 @@ impl Block for Cnblock {
     }
     fn default() -> Self {
         Cnblock {
-            header: BlockHeader::create("##CN", 50, 0),
+            header: BlockHeader::new(b"##CN"),
             cn_cn_next: 0,
             cn_composition: 0,
             cn_tx_name: 0,

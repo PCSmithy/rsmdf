@@ -33,16 +33,62 @@ use block::Block;
 use block_header::BlockHeader;
 use channel::Channel;
 use md_block::Mdblock;
+use crate::mdf4::block::Block as MDF4Block;
+use crate::mdf4::block_header::BlockHeader as MDF4BlockHeader;
+use crate::mdf4::dg_block::Dgblock;
+use crate::mdf4::hd_block::Hdblock;
+use crate::mdf4::id_block::Idblock;
 
+#[derive(Debug)]
 pub struct MDF4 {
-    channels: Vec<Channel>,
+    id_block: Idblock,
+    hd_block: Hdblock,
+    dg_blocks: Vec<Dgblock>,
 }
 
 impl MDF4 {
     pub fn new() -> Self {
         Self {
-            channels: Vec::new(),
+            id_block: Idblock::new(),
+            hd_block: Hdblock::new(),
+            dg_blocks: Vec::new(),
         }
+    }
+
+    pub fn read(bytes: &[u8], pos: usize, little_endian: bool) -> Result<(usize, Self), String> {
+        let mut pos = pos;
+        let (new_pos, id_block) = Idblock::read(bytes, pos, little_endian)?;
+        pos = new_pos;
+
+        let (new_pos, hd_block) = Hdblock::read(bytes, pos, little_endian)?;
+        pos = new_pos;
+
+        let mut dg_blocks = Vec::new();
+        let mut current_dg_block = hd_block.hd_first_dg_block;
+
+        while current_dg_block != 0 {
+            let (new_pos, dg_block) = Dgblock::read(bytes, current_dg_block as usize, little_endian)?;
+            current_dg_block = dg_block.dg_next_dg_block;
+            dg_blocks.push(dg_block);
+        }
+
+        Ok((pos, Self {
+            id_block,
+            hd_block,
+            dg_blocks,
+        }))
+    }
+
+    pub fn id_block(&self) -> &Idblock {
+        &self.id_block
+    }
+
+    pub fn hd_block(&self) -> &Hdblock {
+        &self.hd_block
+    }
+
+    pub fn dg_blocks(&self) -> &[Dgblock] {
+        &self.dg_blocks
     }
 
     pub fn read_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), String> {

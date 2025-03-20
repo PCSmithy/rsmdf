@@ -1,14 +1,16 @@
 pub trait Block {
-    fn new() -> Self;
-    fn default() -> Self;
     fn read(bytes: &[u8], pos: usize, little_endian: bool) -> Result<(usize, Self), String>
     where
         Self: Sized;
+
     fn read_at(bytes: &[u8], pos: usize, little_endian: bool) -> Result<(usize, Self), String>
     where
-        Self: Sized;
+        Self: Sized,
+    {
+        Self::read(bytes, pos, little_endian)
+    }
+
     fn byte_len(&self) -> usize;
-    //fn is_empty(&self) -> bool;
 }
 
 pub trait LinkedBlock {

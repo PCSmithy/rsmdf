@@ -1,7 +1,7 @@
 use std::mem;
 
 use super::block::Block;
-use super::block_header::*;
+use super::block_header::BlockHeader;
 use crate::utils;
 
 use super::block::LinkedBlock;
@@ -124,7 +124,7 @@ impl Cgblock {
 impl Block for Cgblock {
     fn new() -> Self {
         Cgblock {
-            header: BlockHeader::create("##CG", 50, 0),
+            header: BlockHeader::new(b"##CG"),
             cg_cg_next: 0,
             cg_cn_first: 0,
             cg_tx_acq_name: 0,
@@ -140,32 +140,17 @@ impl Block for Cgblock {
             cg_inval_bytes: 0,
         }
     }
-    fn default() -> Self {
-        Cgblock {
-            header: BlockHeader::create("##CG", 50, 0),
-            cg_cg_next: 0,
-            cg_cn_first: 0,
-            cg_tx_acq_name: 0,
-            cg_si_acq_source: 0,
-            cg_sr_first: 0,
-            cg_md_comment: 0,
-            cg_record_id: 0,
-            cg_cycle_count: 0,
-            cg_flags: 0,
-            cg_path_separator: 0,
-            cg_reserved: [0_u8; 4],
-            cg_data_bytes: 0,
-            cg_inval_bytes: 0,
-        }
-    }
-    fn read(stream: &[u8], position: usize, little_endian: bool) -> (usize, Self) {
-        let (pos, header) = BlockHeader::read(stream, position, little_endian);
 
-        if !utils::eq(&header.id, "##CG".as_bytes()) {
-            panic!("Error: Channel group wrong id");
+    fn read(bytes: &[u8], pos: usize, little_endian: bool) -> Result<(usize, Self), String> {
+        let mut pos = pos;
+        let (new_pos, header) = BlockHeader::read(bytes, pos, little_endian)?;
+        pos = new_pos;
+
+        if &header.id != b"##CG" {
+            return Err(format!("Invalid CG block identifier: {:?}", header.id));
         }
 
-        let (mut pos, mut address) = link_extract(stream, pos, little_endian, header.link_count);
+        let (mut pos, mut address) = link_extract(bytes, pos, little_endian, header.link_count);
 
         let next_cg_addr = address.remove(0);
         let first_ch_addr = address.remove(0);
@@ -174,15 +159,15 @@ impl Block for Cgblock {
         let first_sample_reduction_addr = address.remove(0);
         let comment_addr = address.remove(0);
 
-        let record_id = utils::read(stream, little_endian, &mut pos);
-        let cycles_nr = utils::read(stream, little_endian, &mut pos);
-        let flags = utils::read(stream, little_endian, &mut pos);
-        let path_separator = utils::read(stream, little_endian, &mut pos);
-        let cg_reserved = utils::read(stream, little_endian, &mut pos);
-        let samples_byte_nr = utils::read(stream, little_endian, &mut pos);
-        let invalidation_bytes_nr = utils::read(stream, little_endian, &mut pos);
+        let record_id = utils::read(bytes, little_endian, &mut pos);
+        let cycles_nr = utils::read(bytes, little_endian, &mut pos);
+        let flags = utils::read(bytes, little_endian, &mut pos);
+        let path_separator = utils::read(bytes, little_endian, &mut pos);
+        let cg_reserved = utils::read(bytes, little_endian, &mut pos);
+        let samples_byte_nr = utils::read(bytes, little_endian, &mut pos);
+        let invalidation_bytes_nr = utils::read(bytes, little_endian, &mut pos);
 
-        (
+        Ok((
             pos,
             Cgblock {
                 header,
@@ -199,10 +184,12 @@ impl Block for Cgblock {
                 cg_reserved,
                 cg_data_bytes: samples_byte_nr,
                 cg_inval_bytes: invalidation_bytes_nr,
-                // acq_name,
-                // comment,
             },
-        )
+        ))
+    }
+
+    fn read_at(bytes: &[u8], pos: usize, little_endian: bool) -> Result<(usize, Self), String> {
+        Self::read(bytes, pos, little_endian)
     }
 
     fn byte_len(&self) -> usize {

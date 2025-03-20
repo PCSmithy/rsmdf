@@ -109,7 +109,7 @@ impl Dgblock {
 impl Block for Dgblock {
     fn new() -> Self {
         Self {
-            header: BlockHeader::create("##DG", 50, 0),
+            header: BlockHeader::new(b"##DG"),
             dg_dg_next: 0_u64,
             dg_cg_first: 0_u64,
             dg_data: 0_u64,

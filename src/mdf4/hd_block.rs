@@ -67,7 +67,7 @@ impl Hdblock {
 impl Block for Hdblock {
     fn new() -> Self {
         Hdblock {
-            header: BlockHeader::create("##HD", 50, 0),
+            header: BlockHeader::new(b"##HD"),
             hd_dg_first: 0,
             hd_fh_first: 0,
             hd_ch_first: 0,
@@ -87,7 +87,7 @@ impl Block for Hdblock {
     }
     fn default() -> Self {
         Hdblock {
-            header: BlockHeader::create("##HD", 50, 0),
+            header: BlockHeader::new(b"##HD"),
             hd_dg_first: 0,
             hd_fh_first: 0,
             hd_ch_first: 0,

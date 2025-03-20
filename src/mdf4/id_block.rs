@@ -2,73 +2,119 @@ use std::mem;
 
 use super::block::Block;
 use crate::utils;
+use crate::mdf4::block_header::BlockHeader;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Idblock {
-    #[allow(dead_code)]
-    id_file: [u8; 8],
-    #[allow(dead_code)]
-    id_vers: [u8; 8],
-    #[allow(dead_code)]
-    id_prog: [u8; 8],
-    #[allow(dead_code)]
-    id_reserved1: [u8; 4],
-    #[allow(dead_code)]
-    id_ver: u16,
-    #[allow(dead_code)]
-    id_reserved2: [u8; 34],
+    header: BlockHeader,
+    id_file_identifier: String,
+    id_version: u32,
+    id_program_identifier: String,
+    id_reserved: [u8; 4],
+    id_unfinalized_standard_flags: u16,
+    id_unfinalized_custom_flags: u16,
 }
-impl Block for Idblock {
-    fn new() -> Self {
-        Self {
-            id_file: [0; 8],
-            id_vers: [0; 8],
-            id_prog: [0; 8],
-            id_reserved1: [0; 4],
-            id_ver: 0,
-            id_reserved2: [0; 34],
-        }
-    }
-    fn default() -> Self {
-        Self {
-            id_file: [0; 8],
-            id_vers: [0; 8],
-            id_prog: [0; 8],
-            id_reserved1: [0; 4],
-            id_ver: 0,
-            id_reserved2: [0; 34],
-        }
-    }
-    fn read(stream: &[u8], _position: usize, _little_endian: bool) -> (usize, Self) {
-        let mut pos = 0;
-        let litte_endian = true;
-        let id_file = utils::read(stream, _little_endian, &mut pos);
-        let id_vers = utils::read(stream, litte_endian, &mut pos);
-        let id_prog = utils::read(stream, litte_endian, &mut pos);
-        let id_reserved1: [u8; 4] = utils::read(stream, litte_endian, &mut pos);
-        let id_ver = utils::read(stream, litte_endian, &mut pos);
-        let id_reserved2: [u8; 34] = utils::read(stream, litte_endian, &mut pos);
 
-        (
-            pos,
-            Self {
-                id_file,
-                id_vers,
-                id_prog,
-                id_reserved1,
-                id_ver,
-                id_reserved2,
-            },
-        )
+impl Block for Idblock {
+    fn read(bytes: &[u8], pos: usize, little_endian: bool) -> Result<(usize, Self), String> {
+        let mut pos = pos;
+        let (new_pos, header) = BlockHeader::read(bytes, pos, little_endian)?;
+        pos = new_pos;
+
+        if &header.id != b"##ID" {
+            return Err(format!("Invalid ID block identifier: {:?}", header.id));
+        }
+
+        let mut file_id_len = [0u8; 4];
+        file_id_len.copy_from_slice(&bytes[pos..pos + 4]);
+        let file_id_len = if little_endian {
+            u32::from_le_bytes(file_id_len)
+        } else {
+            u32::from_be_bytes(file_id_len)
+        } as usize;
+        pos += 4;
+
+        let id_file_identifier = String::from_utf8_lossy(&bytes[pos..pos + file_id_len]).to_string();
+        pos += file_id_len;
+
+        let mut version_bytes = [0u8; 4];
+        version_bytes.copy_from_slice(&bytes[pos..pos + 4]);
+        let id_version = if little_endian {
+            u32::from_le_bytes(version_bytes)
+        } else {
+            u32::from_be_bytes(version_bytes)
+        };
+        pos += 4;
+
+        let mut program_id_len = [0u8; 4];
+        program_id_len.copy_from_slice(&bytes[pos..pos + 4]);
+        let program_id_len = if little_endian {
+            u32::from_le_bytes(program_id_len)
+        } else {
+            u32::from_be_bytes(program_id_len)
+        } as usize;
+        pos += 4;
+
+        let id_program_identifier = String::from_utf8_lossy(&bytes[pos..pos + program_id_len]).to_string();
+        pos += program_id_len;
+
+        let mut id_reserved = [0u8; 4];
+        id_reserved.copy_from_slice(&bytes[pos..pos + 4]);
+        pos += 4;
+
+        let mut standard_flags_bytes = [0u8; 2];
+        standard_flags_bytes.copy_from_slice(&bytes[pos..pos + 2]);
+        let id_unfinalized_standard_flags = if little_endian {
+            u16::from_le_bytes(standard_flags_bytes)
+        } else {
+            u16::from_be_bytes(standard_flags_bytes)
+        };
+        pos += 2;
+
+        let mut custom_flags_bytes = [0u8; 2];
+        custom_flags_bytes.copy_from_slice(&bytes[pos..pos + 2]);
+        let id_unfinalized_custom_flags = if little_endian {
+            u16::from_le_bytes(custom_flags_bytes)
+        } else {
+            u16::from_be_bytes(custom_flags_bytes)
+        };
+        pos += 2;
+
+        Ok((pos, Self {
+            header,
+            id_file_identifier,
+            id_version,
+            id_program_identifier,
+            id_reserved,
+            id_unfinalized_standard_flags,
+            id_unfinalized_custom_flags,
+        }))
+    }
+
+    fn read_at(bytes: &[u8], pos: usize, little_endian: bool) -> Result<(usize, Self), String> {
+        Self::read(bytes, pos, little_endian)
     }
 
     fn byte_len(&self) -> usize {
-        mem::size_of_val(&self.id_file)
-            + mem::size_of_val(&self.id_vers)
-            + mem::size_of_val(&self.id_prog)
-            + mem::size_of_val(&self.id_reserved1)
-            + mem::size_of_val(&self.id_ver)
-            + mem::size_of_val(&self.id_reserved2)
+        24 + 4 + self.id_file_identifier.len() + 4 + 4 + self.id_program_identifier.len() + 4 + 2 + 2
+    }
+}
+
+impl Idblock {
+    pub fn new() -> Self {
+        Self {
+            header: BlockHeader::new(b"##ID"),
+            id_file_identifier: String::new(),
+            id_version: 0,
+            id_program_identifier: String::new(),
+            id_reserved: [0; 4],
+            id_unfinalized_standard_flags: 0,
+            id_unfinalized_custom_flags: 0,
+        }
+    }
+
+    pub fn version(&self) -> u32 {
+        self.id_version
     }
 }
 
@@ -93,12 +139,13 @@ mod tests {
         let (pos, id_result) = Idblock::read(&RAW, 0, true);
 
         assert_eq!(64, pos);
-        assert!(utils::eq("MDF     ".as_bytes(), &id_result.id_file));
-        assert!(utils::eq("4.10    ".as_bytes(), &id_result.id_vers));
-        assert!(utils::eq("TGT 15.0".as_bytes(), &id_result.id_prog));
-        assert!(utils::eq(&[0_u8; 4], &id_result.id_reserved1));
-        assert_eq!(410, id_result.id_ver);
-        assert!(utils::eq(&[0_u8; 34], &id_result.id_reserved2));
+        assert!(utils::eq("MDF     ".as_bytes(), &id_result.id_file_identifier.as_bytes()));
+        assert!(utils::eq("4.10    ".as_bytes(), &id_result.id_program_identifier.as_bytes()));
+        assert!(utils::eq("TGT 15.0".as_bytes(), &id_result.id_program_identifier.as_bytes()));
+        assert!(utils::eq(&[0_u8; 4], &id_result.id_reserved));
+        assert_eq!(410, id_result.id_version);
+        assert!(utils::eq(&[0_u8; 2], &id_result.id_unfinalized_standard_flags.to_le_bytes()));
+        assert!(utils::eq(&[0_u8; 2], &id_result.id_unfinalized_custom_flags.to_le_bytes()));
     }
 
     #[test]

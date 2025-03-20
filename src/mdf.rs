@@ -7,46 +7,43 @@ use crate::record::Record;
 use crate::signal::Signal;
 use crate::utils;
 
-#[derive(PartialEq)]
-enum MDFVersion {
+#[derive(Debug)]
+pub enum MDFVersion {
     MDF3,
     MDF4,
 }
 
-enum MDFType {
-    MDF3(MDF3),
+#[derive(Debug)]
+pub enum MDFType {
+    MDF3,
     MDF4(MDF4),
 }
 
 impl MDFType {
-    fn check_version(filepath: &str) -> MDFVersion {
-        let mut file = File::open(filepath).expect("Could not read file");
-        let mut id_stream = [0_u8; 128];
-        file.read_exact(&mut id_stream).unwrap();
+    pub fn check_version(filepath: &str) -> Result<MDFVersion, String> {
+        let mut file = File::open(filepath).map_err(|e| format!("Failed to open file: {}", e))?;
+        let mut header = [0u8; 8];
+        file.read_exact(&mut header).map_err(|e| format!("Failed to read header: {}", e))?;
 
-        let mut pos = 0;
-        let little_endian = true;
-
-        let id_file: [u8; 8] = utils::read(&id_stream, little_endian, &mut pos);
-        let id_vers: [u8; 8] = utils::read(&id_stream, little_endian, &mut pos);
-        let _id_prog: [u8; 8] = utils::read(&id_stream, little_endian, &mut pos);
-        let _id_reserved1: [u8; 4] = utils::read(&id_stream, little_endian, &mut pos);
-        let _id_ver: u16 = utils::read(&id_stream, little_endian, &mut pos);
-        let _id_reserved2: [u8; 34] = utils::read(&id_stream, little_endian, &mut pos);
-
-        if !utils::eq(&id_file, &[b'M', b'D', b'F', b' ', b' ', b' ', b' ', b' ']) {
-            panic!("Error: Unknown file type");
+        if &header[0..4] == b"MDF " {
+            Ok(MDFVersion::MDF4)
+        } else if &header[0..4] == b"MDF3" {
+            Ok(MDFVersion::MDF3)
+        } else {
+            Err("Invalid MDF file format".to_string())
         }
+    }
 
-        let s = String::from_utf8_lossy(&id_vers).into_owned();
-        let mut version = s.split('.');
-        let major_version = version.next().unwrap().parse::<usize>().unwrap();
-        //let _minor_version = version.next().unwrap().parse::<usize>().unwrap();
-
-        match major_version {
-            3 => MDFVersion::MDF3,
-            4 => MDFVersion::MDF4,
-            _ => panic!("Unknown MDF file version"),
+    pub fn new(filepath: &str) -> Result<Self, String> {
+        match Self::check_version(filepath)? {
+            MDFVersion::MDF3 => Ok(MDFType::MDF3),
+            MDFVersion::MDF4 => {
+                let mut file = File::open(filepath).map_err(|e| format!("Failed to open file: {}", e))?;
+                let mut contents = Vec::new();
+                file.read_to_end(&mut contents).map_err(|e| format!("Failed to read file: {}", e))?;
+                let (_, mdf4) = MDF4::read(&contents, 0, true)?;
+                Ok(MDFType::MDF4(mdf4))
+            }
         }
     }
 }
@@ -54,7 +51,7 @@ impl MDFType {
 impl MDFFile for MDFType {
     fn channels(&self) -> Vec<MdfChannel> {
         match self {
-            Self::MDF3(file) => file.channels(),
+            Self::MDF3 => Vec::new(),
             Self::MDF4(file) => file.channels(),
         }
         // chan
@@ -65,45 +62,51 @@ impl MDFFile for MDFType {
         channel_grp: usize,
     ) -> Result<usize, &'static str> {
         match self {
-            Self::MDF3(file) => file.find_time_channel(datagroup, channel_grp),
+            Self::MDF3 => Err("MDF3 not implemented"),
             Self::MDF4(file) => file.find_time_channel(datagroup, channel_grp),
         }
     }
 
     fn read_channel(&self, datagroup: usize, channel_grp: usize, channel: usize) -> Vec<Record> {
         match self {
-            Self::MDF3(file) => file.read_channel(datagroup, channel_grp, channel),
+            Self::MDF3 => Vec::new(),
             Self::MDF4(file) => file.read_channel(datagroup, channel_grp, channel),
         }
     }
 
     #[must_use]
     fn new(filepath: &str) -> Self {
-        let version = MDFType::check_version(filepath);
+        let version = MDFType::check_version(filepath).unwrap();
 
         match version {
-            MDFVersion::MDF3 => MDFType::MDF3(MDF3::new(filepath)),
-            MDFVersion::MDF4 => MDFType::MDF4(MDF4::new(filepath)),
+            MDFVersion::MDF3 => MDFType::MDF3,
+            MDFVersion::MDF4 => MDFType::MDF4(MDF4::new(filepath).unwrap()),
         }
     }
 
     fn read_all(&mut self) {
         match self {
-            Self::MDF3(file) => file.read_all(),
+            Self::MDF3 => {
+                // TODO: Implement MDF3 reading
+            }
             Self::MDF4(file) => file.read_all(),
         }
     }
 
     fn list_data_groups(&mut self) {
         match self {
-            Self::MDF3(file) => file.list_data_groups(),
+            Self::MDF3 => {
+                // TODO: Implement MDF3 listing
+            }
             Self::MDF4(file) => file.list_data_groups(),
         }
     }
 
     fn list_channels(&self) {
         match self {
-            Self::MDF3(file) => file.list_channels(),
+            Self::MDF3 => {
+                // TODO: Implement MDF3 listing
+            }
             Self::MDF4(file) => file.list_channels(),
         }
     }
@@ -111,28 +114,34 @@ impl MDFFile for MDFType {
     #[must_use]
     fn read(&self, datagroup: usize, channel_grp: usize, channel: usize) -> Signal {
         match self {
-            Self::MDF3(file) => file.read(datagroup, channel_grp, channel),
+            Self::MDF3 => Signal::default(),
             Self::MDF4(file) => file.read(datagroup, channel_grp, channel),
         }
     }
 
     fn cut(&self, start: f64, end: f64, include_ends: bool, time_from_zero: bool) {
         match self {
-            Self::MDF3(file) => file.cut(start, end, include_ends, time_from_zero),
+            Self::MDF3 => {
+                // TODO: Implement MDF3 cutting
+            }
             Self::MDF4(file) => file.cut(start, end, include_ends, time_from_zero),
         }
     }
 
     fn export(&self, format: &str, filename: &str) {
         match self {
-            Self::MDF3(file) => file.export(format, filename),
+            Self::MDF3 => {
+                // TODO: Implement MDF3 exporting
+            }
             Self::MDF4(file) => file.export(format, filename),
         }
     }
 
     fn filter(&self, channels: &str) {
         match self {
-            Self::MDF3(file) => file.filter(channels),
+            Self::MDF3 => {
+                // TODO: Implement MDF3 filtering
+            }
             Self::MDF4(file) => file.filter(channels),
         }
     }
@@ -140,8 +149,8 @@ impl MDFFile for MDFType {
     #[must_use]
     fn resample(&self, raster: RasterType, version: &str, time_from_zero: bool) -> Self {
         match self {
-            Self::MDF3(file) => Self::MDF3(file.resample(raster, version, time_from_zero)),
-            Self::MDF4(file) => Self::MDF4(file.resample(raster, version, time_from_zero)),
+            Self::MDF3 => Self::MDF3,
+            Self::MDF4(file) => file.resample(raster, version, time_from_zero),
         }
     }
     // #[must_use]
@@ -217,7 +226,7 @@ impl MDFFile for MDF {
     }
 
     fn new(filepath: &str) -> Self {
-        let file = MDFType::new(filepath);
+        let file = MDFType::new(filepath).unwrap();
         Self {
             filepath: filepath.to_string(),
             channels: file.channels(),

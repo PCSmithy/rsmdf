@@ -1,5 +1,5 @@
 use super::block::Block;
-use super::block_header::*;
+use super::block_header::BlockHeader;
 use super::utils as mdf4_utils;
 
 use crate::utils;
@@ -20,13 +20,13 @@ impl Mdblock {
 impl Block for Mdblock {
     fn new() -> Self {
         Self {
-            header: BlockHeader::create("##MD", 50, 0),
+            header: BlockHeader::new(b"##MD"),
             md_data: "".to_string(),
         }
     }
     fn default() -> Self {
         Self {
-            header: BlockHeader::create("##MD", 50, 0),
+            header: BlockHeader::new(b"##MD"),
             md_data: "".to_string(),
         }
     }
@@ -58,7 +58,10 @@ impl Block for Mdblock {
         }
         pos = pos + len - 24;
 
-        Ok((pos, Self { header: BlockHeader::create("##MD", 50, 0), md_data }))
+        Ok((pos, Self {
+            header: BlockHeader::new(b"##MD"),
+            md_data,
+        }))
     }
 
     fn read_at(bytes: &[u8], pos: usize, _: bool) -> Result<(usize, Self), String> {

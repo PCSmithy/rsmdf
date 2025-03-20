@@ -6,7 +6,6 @@ use crate::utils;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockHeader {
     pub id: [u8; 4],
-    pub reserved: [u8; 4],
     pub length: u64,
     pub link_count: u64,
 }
@@ -16,10 +15,6 @@ impl Block for BlockHeader {
         let mut pos = pos;
         let mut id = [0u8; 4];
         id.copy_from_slice(&bytes[pos..pos + 4]);
-        pos += 4;
-
-        let mut reserved = [0u8; 4];
-        reserved.copy_from_slice(&bytes[pos..pos + 4]);
         pos += 4;
 
         let mut length_bytes = [0u8; 8];
@@ -42,7 +37,6 @@ impl Block for BlockHeader {
 
         Ok((pos, Self {
             id,
-            reserved,
             length,
             link_count,
         }))
@@ -53,18 +47,15 @@ impl Block for BlockHeader {
     }
 
     fn byte_len(&self) -> usize {
-        24
+        4 + 8 + 8
     }
 }
 
 impl BlockHeader {
-    pub fn new(id: &[u8]) -> Self {
-        let mut header_id = [0u8; 4];
-        header_id.copy_from_slice(id);
+    pub fn new(id: &[u8; 4]) -> Self {
         Self {
-            id: header_id,
-            reserved: [0u8; 4],
-            length: 24,
+            id: *id,
+            length: 0,
             link_count: 0,
         }
     }
@@ -72,7 +63,6 @@ impl BlockHeader {
     pub fn default() -> Self {
         Self {
             id: [0u8; 4],
-            reserved: [0u8; 4],
             length: 24,
             link_count: 0,
         }
