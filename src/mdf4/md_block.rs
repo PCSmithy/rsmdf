@@ -30,21 +30,49 @@ impl Block for Mdblock {
             md_data: "".to_string(),
         }
     }
-    fn read(stream: &[u8], position: usize, little_endian: bool) -> (usize, Self) {
-        let (pos, header) = BlockHeader::read(stream, position, little_endian);
+    fn read(bytes: &[u8], pos: usize, _: bool) -> Result<(usize, Self), String> {
+        let mut pos = pos;
+        let mut id = [0u8; 4];
+        id.copy_from_slice(&bytes[pos..pos + 4]);
+        pos += 4;
 
-        if !utils::eq(&header.id, "##MD".as_bytes()) {
-            panic!("Error type incorrect");
+        if &id != b"##MD" {
+            return Err(format!("Invalid MD block identifier: {:?}", id));
         }
 
-        let string_length = header.length as usize - header.byte_len();
-        let md_data: String = mdf4_utils::str_from_u8(&stream[pos..(pos + string_length)]);
+        let mut len = [0u8; 4];
+        len.copy_from_slice(&bytes[pos..pos + 4]);
+        let len = u32::from_le_bytes(len) as usize;
+        pos += 4;
 
-        ((pos + string_length), Self { header, md_data })
+        // Skip reserved bytes
+        pos += 16;
+
+        let mut md_data = String::new();
+        let data_bytes = &bytes[pos..pos + len - 24];
+        for &byte in data_bytes {
+            if byte == 0 {
+                break;
+            }
+            md_data.push(byte as char);
+        }
+        pos = pos + len - 24;
+
+        Ok((pos, Self { header: BlockHeader::create("##MD", 50, 0), md_data }))
+    }
+
+    fn read_at(bytes: &[u8], pos: usize, _: bool) -> Result<(usize, Self), String> {
+        Self::read(bytes, pos, false)
     }
 
     fn byte_len(&self) -> usize {
         24 + self.md_data.len() + 1
+    }
+}
+
+impl Mdblock {
+    pub fn data(&self) -> &str {
+        &self.md_data
     }
 }
 
@@ -89,14 +117,14 @@ mod tests {
 
     #[test]
     fn read() {
-        let (pos, _md_block) = Mdblock::read(&RAW, 0, true);
+        let (pos, _md_block) = Mdblock::read(&RAW, 0, true).unwrap();
 
         assert_eq!(469, pos);
     }
 
     #[test]
     fn byte_len() {
-        let (pos, md_block) = Mdblock::read(&RAW, 0, true);
+        let (pos, md_block) = Mdblock::read(&RAW, 0, true).unwrap();
 
         assert_eq!(469, pos);
         assert_eq!(469, md_block.byte_len());
