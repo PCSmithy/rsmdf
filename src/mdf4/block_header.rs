@@ -6,68 +6,75 @@ use crate::utils;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockHeader {
     pub id: [u8; 4],
-    reserved0: [u8; 4],
+    pub reserved: [u8; 4],
     pub length: u64,
     pub link_count: u64,
 }
 
-impl BlockHeader {
-    pub fn create(id: &str, length: usize, link_count: usize) -> Self {
-        if id.len() != 4 {
-            panic!("Incorrect ID type provided: {}", id);
-        }
-
-        let id = id.as_bytes().try_into().unwrap();
-
-        Self {
-            id,
-            reserved0: [0; 4],
-            length: length as u64,
-            link_count: link_count as u64,
-        }
-    }
-}
-
 impl Block for BlockHeader {
-    fn new() -> Self {
-        Self {
-            id: [0; 4],
-            reserved0: [0; 4],
-            length: 0,
-            link_count: 0,
-        }
-    }
-    fn default() -> Self {
-        Self {
-            id: [0; 4],
-            reserved0: [0; 4],
-            length: 0,
-            link_count: 0,
-        }
-    }
-    fn read(stream: &[u8], position: usize, little_endian: bool) -> (usize, Self) {
-        let mut pos = position;
-        let id: [u8; 4] = utils::read(stream, little_endian, &mut pos);
-        let reserved0: [u8; 4] = utils::read(stream, little_endian, &mut pos);
+    fn read(bytes: &[u8], pos: usize, little_endian: bool) -> Result<(usize, Self), String> {
+        let mut pos = pos;
+        let mut id = [0u8; 4];
+        id.copy_from_slice(&bytes[pos..pos + 4]);
+        pos += 4;
 
-        let length = utils::read(stream, little_endian, &mut pos);
-        let link_count = utils::read(stream, little_endian, &mut pos);
+        let mut reserved = [0u8; 4];
+        reserved.copy_from_slice(&bytes[pos..pos + 4]);
+        pos += 4;
 
-        (
-            pos,
-            Self {
-                id,
-                reserved0,
-                length,
-                link_count,
-            },
-        )
+        let mut length_bytes = [0u8; 8];
+        length_bytes.copy_from_slice(&bytes[pos..pos + 8]);
+        let length = if little_endian {
+            u64::from_le_bytes(length_bytes)
+        } else {
+            u64::from_be_bytes(length_bytes)
+        };
+        pos += 8;
+
+        let mut link_count_bytes = [0u8; 8];
+        link_count_bytes.copy_from_slice(&bytes[pos..pos + 8]);
+        let link_count = if little_endian {
+            u64::from_le_bytes(link_count_bytes)
+        } else {
+            u64::from_be_bytes(link_count_bytes)
+        };
+        pos += 8;
+
+        Ok((pos, Self {
+            id,
+            reserved,
+            length,
+            link_count,
+        }))
+    }
+
+    fn read_at(bytes: &[u8], pos: usize, little_endian: bool) -> Result<(usize, Self), String> {
+        Self::read(bytes, pos, little_endian)
     }
 
     fn byte_len(&self) -> usize {
-        self.id.len()
-            + self.reserved0.len()
-            + mem::size_of_val(&self.length)
-            + mem::size_of_val(&self.link_count)
+        24
+    }
+}
+
+impl BlockHeader {
+    pub fn new(id: &[u8]) -> Self {
+        let mut header_id = [0u8; 4];
+        header_id.copy_from_slice(id);
+        Self {
+            id: header_id,
+            reserved: [0u8; 4],
+            length: 24,
+            link_count: 0,
+        }
+    }
+
+    pub fn default() -> Self {
+        Self {
+            id: [0u8; 4],
+            reserved: [0u8; 4],
+            length: 24,
+            link_count: 0,
+        }
     }
 }
