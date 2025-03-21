@@ -4,10 +4,9 @@ use super::utils as mdf4_utils;
 
 use crate::utils;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Mdblock {
     header: BlockHeader,
-
     md_data: String,
 }
 
@@ -18,62 +17,45 @@ impl Mdblock {
 }
 
 impl Block for Mdblock {
-    fn new() -> Self {
-        Self {
-            header: BlockHeader::new(b"##MD"),
-            md_data: "".to_string(),
-        }
-    }
-    fn default() -> Self {
-        Self {
-            header: BlockHeader::new(b"##MD"),
-            md_data: "".to_string(),
-        }
-    }
-    fn read(bytes: &[u8], pos: usize, _: bool) -> Result<(usize, Self), String> {
+    fn read(bytes: &[u8], pos: usize, little_endian: bool) -> Result<(usize, Self), String> {
         let mut pos = pos;
-        let mut id = [0u8; 4];
-        id.copy_from_slice(&bytes[pos..pos + 4]);
-        pos += 4;
+        let (new_pos, header) = BlockHeader::read(bytes, pos, little_endian)?;
+        pos = new_pos;
 
-        if &id != b"##MD" {
-            return Err(format!("Invalid MD block identifier: {:?}", id));
+        if &header.id != b"##MD" {
+            return Err(format!("Invalid MD block identifier: {:?}", header.id));
         }
-
-        let mut len = [0u8; 4];
-        len.copy_from_slice(&bytes[pos..pos + 4]);
-        let len = u32::from_le_bytes(len) as usize;
-        pos += 4;
-
-        // Skip reserved bytes
-        pos += 16;
 
         let mut md_data = String::new();
-        let data_bytes = &bytes[pos..pos + len - 24];
+        let data_bytes = &bytes[pos..pos + header.length as usize - 24];
         for &byte in data_bytes {
             if byte == 0 {
                 break;
             }
             md_data.push(byte as char);
         }
-        pos = pos + len - 24;
+        pos = pos + header.length as usize - 24;
 
-        Ok((pos, Self {
-            header: BlockHeader::new(b"##MD"),
-            md_data,
-        }))
+        Ok((pos, Self { header, md_data }))
     }
 
-    fn read_at(bytes: &[u8], pos: usize, _: bool) -> Result<(usize, Self), String> {
-        Self::read(bytes, pos, false)
+    fn read_at(bytes: &[u8], pos: usize, little_endian: bool) -> Result<(usize, Self), String> {
+        Self::read(bytes, pos, little_endian)
     }
 
     fn byte_len(&self) -> usize {
-        24 + self.md_data.len() + 1
+        self.header.byte_len() + self.md_data.len()
     }
 }
 
 impl Mdblock {
+    pub fn new() -> Self {
+        Self {
+            header: BlockHeader::new(b"##MD"),
+            md_data: String::new(),
+        }
+    }
+
     pub fn data(&self) -> &str {
         &self.md_data
     }
@@ -81,7 +63,7 @@ impl Mdblock {
 
 #[cfg(test)]
 mod tests {
-    use crate::mdf4::{block::Block, md_block::Mdblock};
+    use super::*;
 
     static RAW: [u8; 472] = [
         0x23, 0x23, 0x4D, 0x44, 0x00, 0x00, 0x00, 0x00, 0xD5, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -120,15 +102,16 @@ mod tests {
 
     #[test]
     fn read() {
-        let (pos, _md_block) = Mdblock::read(&RAW, 0, true).unwrap();
-
+        let (pos, md_block) = Mdblock::read(&RAW, 0, true).unwrap();
         assert_eq!(469, pos);
+        assert_eq!(b"##MD", &md_block.header.id);
+        assert_eq!(469, md_block.header.length);
+        assert_eq!(0, md_block.header.link_count);
     }
 
     #[test]
     fn byte_len() {
         let (pos, md_block) = Mdblock::read(&RAW, 0, true).unwrap();
-
         assert_eq!(469, pos);
         assert_eq!(469, md_block.byte_len());
     }
