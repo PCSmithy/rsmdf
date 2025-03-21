@@ -392,8 +392,7 @@ impl MDFFile for MDF4 {
         };
 
         // Read metadata based on file version
-        let (pos, comment) = mdf.read_metadata(&stream, position, little_endian);
-        position = pos;
+        let (_, comment) = mdf.read_metadata(&stream, position, little_endian);
 
         mdf.comment = comment;
 

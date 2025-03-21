@@ -24,5 +24,3 @@ pub mod si_block;
 mod sr_block;
 pub mod tx_block;
 mod utils;
-
-pub use mdf4_file::MDF4;
