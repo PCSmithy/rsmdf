@@ -1,6 +1,8 @@
 use super::cg_block::Cgblock;
 use super::cn_block::Cnblock;
-use crate::mdf::{self, MDFFile, MdfChannel, RasterType};
+use super::fh_block::Fhblock;
+use super::tx_block::Txblock;
+use crate::mdf::{self, MDFFile, MdfChannel, RasterType, SourceInformation};
 use crate::record::Record;
 use crate::signal::{self, Signal};
 use crate::utils;
@@ -12,6 +14,7 @@ use super::dg_block::Dgblock;
 use super::hd_block::Hdblock;
 use super::id_block::Idblock;
 use super::mdf4_enums::ChannelType;
+use super::si_block::Siblock;
 
 pub fn link_extract(
     stream: &[u8],
@@ -40,6 +43,229 @@ pub struct MDF4 {
     channel_groups: Vec<Cgblock>,
     little_endian: bool,
     file: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChannelGroupMetadata {
+    pub source_type: String,
+    pub source_name: String,
+    pub source_path: String,
+    pub bus_type: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChannelMetadata {
+    pub description: String,
+    pub unit: String,
+    pub source: String,
+}
+
+impl MDF4 {
+    fn read_metadata(
+        &mut self,
+        stream: &[u8],
+        position: usize,
+        little_endian: bool,
+    ) -> (usize, String) {
+        let mut pos = position;
+        let mut comment = String::new();
+
+        // Try to read the next block header
+        if pos + 4 > stream.len() {
+            return (pos, comment);
+        }
+
+        let header_bytes = &stream[pos..pos + 4];
+
+        match header_bytes {
+            b"##FH" => {
+                // v4.11 style - FH block followed by TX block
+                let (new_pos, fh_block) = Fhblock::read(stream, pos, little_endian);
+                pos = new_pos;
+
+                // Read the TX block that follows
+                if let Some(tx_pos) = fh_block.comment_addr() {
+                    if let Ok((_pos, tx_block)) =
+                        Txblock::try_read(stream, tx_pos as usize, little_endian)
+                    {
+                        comment = tx_block.text();
+                    }
+                }
+            }
+            b"##MD" => {
+                // v4.10 style - direct MD block
+                let (new_pos, md_block) =
+                    super::md_block::Mdblock::read(stream, pos, little_endian);
+                pos = new_pos;
+                comment = md_block.text();
+            }
+            b"##FR" => {
+                // Skip FR block and continue
+                let (new_pos, _) =
+                    super::block_header::BlockHeader::read(stream, pos, little_endian);
+                pos = new_pos;
+            }
+            _ => {
+                // Unknown block type, skip metadata
+                println!(
+                    "Warning: Unknown metadata block type: {:?}",
+                    String::from_utf8_lossy(header_bytes)
+                );
+                // Skip the block by reading its header to get the length
+                let (new_pos, header) =
+                    super::block_header::BlockHeader::read(stream, pos, little_endian);
+                pos = new_pos + (header.length as usize - header.byte_len());
+            }
+        }
+
+        (pos, comment)
+    }
+
+    pub fn get_source_information(
+        &self,
+        data_group: usize,
+        channel_group: usize,
+    ) -> Option<SourceInformation> {
+        let dg = &self.data_groups[data_group];
+        let channel_groups = dg
+            .first(&self.file, self.little_endian)
+            .list(&self.file, self.little_endian);
+
+        let cg = &channel_groups[channel_group];
+
+        // Get SI block from channel group
+        if cg.cg_si_acq_source == 0 {
+            return None;
+        }
+
+        let (_, si_block) =
+            Siblock::read(&self.file, cg.cg_si_acq_source as usize, self.little_endian);
+
+        // Get source name and path from TX blocks
+        let source_name = if si_block.si_tx_name != 0 {
+            let (_, tx_block) =
+                Txblock::read(&self.file, si_block.si_tx_name as usize, self.little_endian);
+            tx_block.text()
+        } else {
+            String::new()
+        };
+
+        let source_path = if si_block.si_tx_path != 0 {
+            let (_, tx_block) =
+                Txblock::read(&self.file, si_block.si_tx_path as usize, self.little_endian);
+            tx_block.text()
+        } else {
+            String::new()
+        };
+
+        Some(SourceInformation {
+            source_type: si_block.si_type,
+            bus_type: si_block.si_bus_type,
+            source_name,
+            source_path,
+        })
+    }
+
+    pub fn get_channel_group_metadata(
+        &self,
+        data_group: usize,
+        channel_group: usize,
+    ) -> Option<ChannelGroupMetadata> {
+        let dg = &self.data_groups[data_group];
+        let channel_groups = dg
+            .first(&self.file, self.little_endian)
+            .list(&self.file, self.little_endian);
+
+        let cg = &channel_groups[channel_group];
+
+        // Get SI block from channel group
+        if cg.cg_si_acq_source == 0 {
+            return None;
+        }
+
+        let (_, si_block) =
+            Siblock::read(&self.file, cg.cg_si_acq_source as usize, self.little_endian);
+
+        // Get source name and path from TX blocks
+        let source_name = if si_block.si_tx_name != 0 {
+            let (_, tx_block) =
+                Txblock::read(&self.file, si_block.si_tx_name as usize, self.little_endian);
+            tx_block.text()
+        } else {
+            String::new()
+        };
+
+        let source_path = if si_block.si_tx_path != 0 {
+            let (_, tx_block) =
+                Txblock::read(&self.file, si_block.si_tx_path as usize, self.little_endian);
+            tx_block.text()
+        } else {
+            String::new()
+        };
+
+        Some(ChannelGroupMetadata {
+            source_type: format!("{:?}", si_block.si_type),
+            source_name,
+            source_path,
+            bus_type: format!("{:?}", si_block.si_bus_type),
+        })
+    }
+
+    pub fn get_channel_metadata(
+        &self,
+        data_group: usize,
+        channel_group: usize,
+        channel: usize,
+    ) -> Option<ChannelMetadata> {
+        let dg = &self.data_groups[data_group];
+        let channel_groups = dg
+            .first(&self.file, self.little_endian)
+            .list(&self.file, self.little_endian);
+
+        let cg = &channel_groups[channel_group];
+        let channels = cg
+            .first(&self.file, self.little_endian)
+            .list(&self.file, self.little_endian);
+
+        let cn = &channels[channel];
+
+        // Get metadata from TX blocks
+        let description = if cn.cn_md_comment != 0 {
+            let (_, tx_block) =
+                Txblock::read(&self.file, cn.cn_md_comment as usize, self.little_endian);
+            tx_block.text()
+        } else {
+            String::new()
+        };
+
+        let unit = if cn.cn_md_unit != 0 {
+            let (_, tx_block) =
+                Txblock::read(&self.file, cn.cn_md_unit as usize, self.little_endian);
+            tx_block.text()
+        } else {
+            String::new()
+        };
+
+        let source = if cn.cn_si_source != 0 {
+            let (_, si_block) =
+                Siblock::read(&self.file, cn.cn_si_source as usize, self.little_endian);
+            if si_block.si_tx_name != 0 {
+                let (_, tx_block) =
+                    Txblock::read(&self.file, si_block.si_tx_name as usize, self.little_endian);
+                tx_block.text()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        Some(ChannelMetadata {
+            description,
+            unit,
+            source,
+        })
+    }
 }
 
 impl MDFFile for MDF4 {
@@ -146,42 +372,72 @@ impl MDFFile for MDF4 {
         let _ = file.read_to_end(&mut stream);
 
         let little_endian = true;
-        let position = 0;
+        let mut position = 0;
 
         let (pos, id) = Idblock::read(&stream, position, little_endian);
-        let (_pos, header) = Hdblock::read(&stream, pos, little_endian);
-        let comment = header.comment(&stream, little_endian);
+        position = pos;
+
+        let (pos, header) = Hdblock::read(&stream, position, little_endian);
+        position = pos;
+
         let mut mdf = Self {
-            id,
+            id: id.clone(),
             header: header.clone(),
-            comment,
-            data_groups: header
-                .first_data_group(&stream, little_endian)
-                .list(&stream, little_endian),
+            comment: String::new(),
+            data_groups: Vec::new(),
             channels: Vec::new(),
             channel_groups: Vec::new(),
             little_endian,
-            file: stream,
+            file: stream.clone(),
         };
 
-        mdf.read_all();
+        // Read metadata based on file version
+        let (pos, comment) = mdf.read_metadata(&stream, position, little_endian);
+        position = pos;
+
+        mdf.comment = comment;
+
+        // Only load the data groups initially, defer channel loading
+        mdf.data_groups = header
+            .first_data_group(&stream, little_endian)
+            .list(&stream, little_endian);
 
         mdf
     }
 
     fn read_all(&mut self) {
+        // Load channel groups and channels only when explicitly requested
         let mut channel_groups = Vec::with_capacity(self.data_groups.len());
-        for group in &self.data_groups {
-            let group1 = group.clone();
-            let mut grp = group1.read_channel_groups(&self.file, self.little_endian);
-            channel_groups.append(&mut grp);
-        }
-
         let mut channels = Vec::new();
-        for grp in &channel_groups {
-            let grp1 = grp.clone();
 
-            channels.append(&mut grp1.channels(&self.file, self.little_endian));
+        for group in &self.data_groups {
+            let mut current_cg = group.first(&self.file, self.little_endian);
+
+            loop {
+                let first_cn = current_cg.first(&self.file, self.little_endian);
+                let mut current_cn = first_cn;
+
+                // Add current channel group
+                channel_groups.push(current_cg.clone());
+
+                // Collect all channels in this group
+                loop {
+                    channels.push(current_cn.clone());
+
+                    if let Some(next_cn) = current_cn.next(&self.file, self.little_endian) {
+                        current_cn = next_cn;
+                    } else {
+                        break;
+                    }
+                }
+
+                // Move to next channel group if it exists
+                if let Some(next_cg) = current_cg.next(&self.file, self.little_endian) {
+                    current_cg = next_cg;
+                } else {
+                    break;
+                }
+            }
         }
 
         self.channel_groups = channel_groups;

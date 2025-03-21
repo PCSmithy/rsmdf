@@ -20,16 +20,13 @@ pub struct Cnblock {
     cn_composition: u64,
     #[allow(dead_code)]
     cn_tx_name: u64, //address of TXBLOCK that contains the channel name
-    #[allow(dead_code)]
-    cn_si_source: u64, //address of channel source block
+    pub cn_si_source: u64, //address of channel source block
     #[allow(dead_code)]
     cn_cc_conversion: u64, //address of channel conversion block
     #[allow(dead_code)]
     cn_data: u64, //address of signal data block for VLSD channels
-    #[allow(dead_code)]
-    cn_md_unit: u64, //address of TXBLOCK that contains the channel unit
-    #[allow(dead_code)]
-    cn_md_comment: u64,
+    pub cn_md_unit: u64,   //address of TXBLOCK that contains the channel unit
+    pub cn_md_comment: u64,
     #[allow(dead_code)]
     cn_at_reference: Vec<u64>,
     #[allow(dead_code)]

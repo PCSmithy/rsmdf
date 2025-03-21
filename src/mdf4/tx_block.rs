@@ -2,6 +2,21 @@ use super::block::Block;
 use super::block_header::*;
 use super::utils as mdf4_utils;
 use crate::utils;
+use std::error::Error;
+use std::fmt;
+
+#[derive(Debug)]
+pub struct TxBlockError {
+    message: String,
+}
+
+impl fmt::Display for TxBlockError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl Error for TxBlockError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Txblock {
@@ -29,22 +44,38 @@ impl Block for Txblock {
         }
     }
     fn read(stream: &[u8], position: usize, little_endian: bool) -> (usize, Self) {
-        let (pos, header) = BlockHeader::read(stream, position, little_endian);
-
-        if !utils::eq(&header.id, "##TX".as_bytes()) {
-            println!("Found: {:?} at {}", &header.id, position);
-            panic!("Error type incorrect");
+        match Self::try_read(stream, position, little_endian) {
+            Ok((pos, block)) => (pos, block),
+            Err(e) => panic!("{}", e), // maintain backward compatibility for now
         }
-
-        let length = header.length as usize - header.byte_len();
-
-        let tx_data = mdf4_utils::str_from_u8(&stream[pos..(pos + length)]);
-
-        (pos + length, Self { header, tx_data })
     }
 
     fn byte_len(&self) -> usize {
         self.header.byte_len() + self.tx_data.len() + 1 // add 1 for the trailing null on a c string
+    }
+}
+
+impl Txblock {
+    pub fn try_read(
+        stream: &[u8],
+        position: usize,
+        little_endian: bool,
+    ) -> Result<(usize, Self), TxBlockError> {
+        let (pos, header) = BlockHeader::read(stream, position, little_endian);
+
+        if !utils::eq(&header.id, "##TX".as_bytes()) {
+            return Err(TxBlockError {
+                message: format!(
+                    "Expected TX block but found: {:?} at {}",
+                    &header.id, position
+                ),
+            });
+        }
+
+        let length = header.length as usize - header.byte_len();
+        let tx_data = mdf4_utils::str_from_u8(&stream[pos..(pos + length)]);
+
+        Ok((pos + length, Self { header, tx_data }))
     }
 }
 

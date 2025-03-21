@@ -89,10 +89,10 @@ impl FromBytes for u16 {
 }
 impl FromBytes for u8 {
     fn from_be_bytes(a: &[u8]) -> Self {
-        Self::from_be_bytes(FromBytes::from_be_bytes(a))
+        a[0]
     }
     fn from_le_bytes(a: &[u8]) -> Self {
-        Self::from_le_bytes(FromBytes::from_le_bytes(a))
+        a[0]
     }
 }
 

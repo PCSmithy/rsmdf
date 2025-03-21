@@ -18,8 +18,7 @@ pub struct Cgblock {
     cg_cn_first: u64, //- int : address of first channel of this channel group
     #[allow(dead_code)]
     cg_tx_acq_name: u64, //- int : address of TextBLock that contains the channel
-    #[allow(dead_code)]
-    cg_si_acq_source: u64, //- int : address of SourceInformation that contains the
+    pub cg_si_acq_source: u64, //- int : address of SourceInformation that contains the
     #[allow(dead_code)]
     cg_sr_first: u64, // - int : address of first SRBLOCK; this is
     #[allow(dead_code)]

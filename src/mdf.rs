@@ -2,12 +2,14 @@ use std::fs::File;
 use std::io::Read;
 
 use crate::mdf3::mdf3_file::MDF3;
+use crate::mdf4::mdf4_enums::{BusType, SourceType};
 use crate::mdf4::mdf4_file::MDF4;
+use crate::mdf4::mdf4_file::{ChannelGroupMetadata, ChannelMetadata};
 use crate::record::Record;
 use crate::signal::Signal;
 use crate::utils;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 enum MDFVersion {
     MDF3,
     MDF4,
@@ -47,6 +49,29 @@ impl MDFType {
             3 => MDFVersion::MDF3,
             4 => MDFVersion::MDF4,
             _ => panic!("Unknown MDF file version"),
+        }
+    }
+
+    pub fn get_channel_group_metadata(
+        &self,
+        data_group: usize,
+        channel_group: usize,
+    ) -> Option<ChannelGroupMetadata> {
+        match self {
+            Self::MDF3(_) => None, // MDF3 doesn't have SI blocks
+            Self::MDF4(file) => file.get_channel_group_metadata(data_group, channel_group),
+        }
+    }
+
+    pub fn get_channel_metadata(
+        &self,
+        data_group: usize,
+        channel_group: usize,
+        channel: usize,
+    ) -> Option<ChannelMetadata> {
+        match self {
+            Self::MDF3(_) => None, // MDF3 doesn't have SI blocks
+            Self::MDF4(file) => file.get_channel_metadata(data_group, channel_group, channel),
         }
     }
 }
@@ -164,20 +189,26 @@ pub struct MDF {
 }
 
 impl MDF {
-    pub fn search_channels(&self, channel_name: &str) -> Result<MdfChannel, &'static str> {
-        let mut channels_match = Vec::with_capacity(self.channels.len());
+    pub fn search_channels(&self, channel_name: &str) -> Vec<MdfChannel> {
+        self.channels
+            .iter()
+            .filter(|ch| ch.name.eq(channel_name))
+            .cloned()
+            .collect()
+    }
 
-        for channel in &self.channels {
-            if channel.name.eq(&channel_name) {
-                channels_match.push(channel.clone());
-            }
-        }
+    pub fn search_channel_exact(&self, name: &str, dg: usize, cg: usize) -> Option<MdfChannel> {
+        self.channels
+            .iter()
+            .find(|ch| ch.name.eq(name) && ch.data_group == dg && ch.channel_group == cg)
+            .cloned()
+    }
 
-        match channels_match.len() {
+    pub fn search_channel_first(&self, channel_name: &str) -> Result<MdfChannel, &'static str> {
+        let matches = self.search_channels(channel_name);
+        match matches.len() {
             0 => Err("Channel not found"),
-            1 => Ok(channels_match[0].clone()),
-            l if 1 < l => Err("Multiple matches found"),
-            _ => Err(r#"Unknown error measuring length of matching channels"#),
+            _ => Ok(matches[0].clone()),
         }
     }
 
@@ -196,6 +227,17 @@ impl MDF {
             channel.channel_group as usize,
             channel.channel as usize,
         )
+    }
+
+    pub fn get_source_information(
+        &self,
+        data_group: usize,
+        channel_group: usize,
+    ) -> Option<SourceInformation> {
+        match &self.file {
+            MDFType::MDF3(_) => None, // MDF3 doesn't have SI blocks
+            MDFType::MDF4(file) => file.get_source_information(data_group, channel_group),
+        }
     }
 }
 
@@ -355,6 +397,320 @@ impl TimeChannel {
 pub struct MdfChannel {
     pub name: String,
     pub data_group: usize,
-    pub channel: usize,
     pub channel_group: usize,
+    pub channel: usize,
+}
+
+impl MdfChannel {
+    pub fn full_path(&self) -> String {
+        format!(
+            "/DG{}/CG{}/{}",
+            self.data_group, self.channel_group, self.name
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceInformation {
+    pub source_type: SourceType,
+    pub bus_type: BusType,
+    pub source_name: String,
+    pub source_path: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    const DEMO_FILES: [&str; 4] = [
+        "example_files/ASAP2_Demo_V171.mf4",
+        "example_files/ASAP2_Demo_V171_deflate.mf4",
+        "example_files/ASAP2_Demo_V171_transpose_deflate.mf4",
+        "example_files/Discrete_deflate.mf4",
+    ];
+
+    const SMALL_DEMO_FILES: [&str; 4] = [
+        "example_files/ASAP2_Demo_V171.mf4",
+        "example_files/ASAP2_Demo_V171_deflate.mf4",
+        "example_files/ASAP2_Demo_V171_transpose_deflate.mf4",
+        "example_files/Discrete_deflate.mf4",
+    ];
+
+    fn create_test_mdf3_file() -> NamedTempFile {
+        let mut file = NamedTempFile::new().unwrap();
+
+        // Calculate offsets
+        let id_block_offset = 0;
+        let hd_block_offset = id_block_offset + 64;
+        let tx_block_offset = hd_block_offset + 164;
+        let dg_block_offset = tx_block_offset + 32;
+        let cg_block_offset = dg_block_offset + 28;
+        let cn_block_offset = cg_block_offset + 26;
+
+        // ID Block (64 bytes)
+        let mut id_block = Vec::new();
+        id_block.extend_from_slice(&[b'M', b'D', b'F', b' ', b' ', b' ', b' ', b' ']); // "MDF     "
+        id_block.extend_from_slice(&[b'3', b'.', b'3', b'0', b' ', b' ', b' ', b' ']); // "3.30    "
+        id_block.extend_from_slice(&[b'r', b's', b'm', b'd', b'f', b' ', b' ', b' ']); // "rsmdf   "
+        id_block.extend_from_slice(&[0x00, 0x00]); // default_byte_order (little endian)
+        id_block.extend_from_slice(&[0x00, 0x00]); // default_float_format
+        id_block.extend_from_slice(&[0x4A, 0x01]); // version_number (330)
+        id_block.extend_from_slice(&[0x00, 0x00]); // code_page_number
+        id_block.extend_from_slice(&[0x00, 0x00]); // reserved1
+        id_block.extend_from_slice(&[0x00; 30]); // reserved2
+
+        // HD Block (164 bytes)
+        let mut hd_block = Vec::new();
+        hd_block.extend_from_slice(&[b'H', b'D']); // block_type
+        hd_block.extend_from_slice(&[0xA4, 0x00, 0x00, 0x00]); // block_size (164)
+        hd_block.extend_from_slice(&(dg_block_offset as u32).to_le_bytes().as_slice()); // pointer_dg
+        hd_block.extend_from_slice(&(tx_block_offset as u32).to_le_bytes().as_slice()); // pointer_tx
+        hd_block.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // pointer_pr
+        hd_block.extend_from_slice(&[0x01, 0x00]); // data_group_number (1)
+        hd_block.extend_from_slice(&[b'0', b'1', b'.', b'0', b'1', b'.', b'2', b'4', b' ', b' ']); // date
+        hd_block.extend_from_slice(&[b'0', b'0', b':', b'0', b'0', b':', b'0', b'0']); // time
+        hd_block.extend_from_slice(&[0x00; 32]); // author
+        hd_block.extend_from_slice(&[0x00; 32]); // department
+        hd_block.extend_from_slice(&[0x00; 32]); // project
+        hd_block.extend_from_slice(&[0x00; 32]); // subject
+        hd_block.extend_from_slice(&[0x00; 8]); // timestamp
+        hd_block.extend_from_slice(&[0x00, 0x00]); // utc_time_offset
+        hd_block.extend_from_slice(&[0x00, 0x00]); // time_quality
+        hd_block.extend_from_slice(&[0x00; 32]); // timer_id
+
+        // TX Block (32 bytes)
+        let mut tx_block = Vec::new();
+        tx_block.extend_from_slice(&[b'T', b'X']); // block_type
+        tx_block.extend_from_slice(&[0x20, 0x00, 0x00, 0x00]); // block_size (32)
+        tx_block.extend_from_slice(b"Test MDF3 File\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"); // text content
+
+        // DG Block (28 bytes)
+        let mut dg_block = Vec::new();
+        dg_block.extend_from_slice(&[b'D', b'G']); // block_type
+        dg_block.extend_from_slice(&[0x1C, 0x00, 0x00, 0x00]); // block_size (28)
+        dg_block.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // pointer_next_dg
+        dg_block.extend_from_slice(&(cg_block_offset as u32).to_le_bytes().as_slice()); // pointer_first_cg
+        dg_block.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // trigger_block
+        dg_block.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // data_block
+        dg_block.extend_from_slice(&[0x01, 0x00]); // group_number
+        dg_block.extend_from_slice(&[0x01, 0x00]); // id_number
+        dg_block.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // reserved
+
+        // CG Block (26 bytes)
+        let mut cg_block = Vec::new();
+        cg_block.extend_from_slice(&[b'C', b'G']); // block_type
+        cg_block.extend_from_slice(&[0x1A, 0x00, 0x00, 0x00]); // block_size (26)
+        cg_block.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // pointer_next_cg
+        cg_block.extend_from_slice(&(cn_block_offset as u32).to_le_bytes().as_slice()); // pointer_first_cn
+        cg_block.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // comment
+        cg_block.extend_from_slice(&[0x01, 0x00]); // record_id
+        cg_block.extend_from_slice(&[0x01, 0x00]); // number_of_channels
+        cg_block.extend_from_slice(&[0x00, 0x00]); // record_size
+        cg_block.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // record_number
+        cg_block.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // first_sample_reduction_block
+
+        // CN Block (228 bytes)
+        let mut cn_block = Vec::new();
+        cn_block.extend_from_slice(&[b'C', b'N']); // block_type
+        cn_block.extend_from_slice(&[0xE4, 0x00, 0x00, 0x00]); // block_size (228)
+        cn_block.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // pointer_next_cn
+        cn_block.extend_from_slice(&[0x00, 0x00]); // channel_type
+        cn_block.extend_from_slice(&[0x00, 0x00]); // short_name_length
+        cn_block.extend_from_slice(&[0x00, 0x00]); // description_length
+        cn_block.extend_from_slice(&[0x00; 216]); // remaining CN block data
+
+        // Write all blocks to file
+        file.write_all(&id_block).unwrap();
+        file.write_all(&hd_block).unwrap();
+        file.write_all(&tx_block).unwrap();
+        file.write_all(&dg_block).unwrap();
+        file.write_all(&cg_block).unwrap();
+        file.write_all(&cn_block).unwrap();
+        file.flush().unwrap();
+
+        file
+    }
+
+    #[test]
+    fn test_mdf3_version_detection() {
+        let test_file = create_test_mdf3_file();
+        let version = MDFType::check_version(test_file.path().to_str().unwrap());
+        assert_eq!(version, MDFVersion::MDF3);
+    }
+
+    #[test]
+    fn test_mdf4_version_detection() {
+        // Test all demo files
+        for file in DEMO_FILES.iter() {
+            let version = MDFType::check_version(file);
+            assert_eq!(version, MDFVersion::MDF4, "File {} should be MDF4", file);
+        }
+    }
+
+    #[test]
+    fn test_mdf4_file_loading() {
+        // Test smaller demo files first
+        for file in SMALL_DEMO_FILES.iter() {
+            let mut mdf = MDF::new(file);
+            assert!(
+                !mdf.filepath.is_empty(),
+                "File path should not be empty for {}",
+                file
+            );
+            mdf.read_all();
+            assert!(
+                !mdf.channels.is_empty(),
+                "Channels should not be empty for {}",
+                file
+            );
+        }
+    }
+
+    #[test]
+    fn test_mdf4_channel_listing() {
+        // Test smaller demo files first
+        for file in SMALL_DEMO_FILES.iter() {
+            let mut mdf = MDF::new(file);
+            mdf.read_all();
+            let channels = mdf.channels();
+            assert!(
+                !channels.is_empty(),
+                "Channels should not be empty for {}",
+                file
+            );
+            println!("Found {} channels in {}", channels.len(), file);
+        }
+    }
+
+    #[test]
+    fn test_mdf4_channel_search() {
+        // Test smaller demo files first
+        for file in SMALL_DEMO_FILES.iter() {
+            let mut mdf = MDF::new(file);
+            mdf.read_all();
+            let channels = mdf.channels();
+            if let Some(first_channel) = channels.first() {
+                let channel = mdf.search_channel_first(&first_channel.name);
+                assert!(
+                    channel.is_ok(),
+                    "Should find channel {} in {}",
+                    first_channel.name,
+                    file
+                );
+                let found = channel.unwrap();
+                assert_eq!(found.name, first_channel.name);
+            } else {
+                panic!("No channels found in {}", file);
+            }
+        }
+    }
+
+    #[test]
+    fn test_mdf4_duplicate_channels() {
+        // Test smaller demo files first
+        for file in SMALL_DEMO_FILES.iter() {
+            let mut mdf = MDF::new(file);
+            mdf.read_all();
+            let channels = mdf.channels();
+
+            // Find a channel name that appears multiple times
+            let mut duplicate_channels: Vec<MdfChannel> = Vec::new();
+            let mut duplicate_name = String::new();
+
+            for channel in &channels {
+                let matches = mdf.search_channels(&channel.name);
+                if matches.len() > 1 {
+                    duplicate_channels = matches;
+                    duplicate_name = channel.name.clone();
+                    break;
+                }
+            }
+
+            if !duplicate_channels.is_empty() {
+                println!(
+                    "Found {} instances of channel '{}'",
+                    duplicate_channels.len(),
+                    duplicate_name
+                );
+
+                // Print details of first few instances
+                println!("\nFirst 5 instances:");
+                for channel in duplicate_channels.iter().take(5) {
+                    println!("  Path: {}", channel.full_path());
+                    println!("    Data Group: {}", channel.data_group);
+                    println!("    Channel Group: {}", channel.channel_group);
+                    println!("    Channel Index: {}", channel.channel);
+                }
+
+                // Verify each instance has a unique path
+                let paths: Vec<String> =
+                    duplicate_channels.iter().map(|ch| ch.full_path()).collect();
+                let unique_paths: std::collections::HashSet<_> = paths.iter().collect();
+                assert_eq!(
+                    paths.len(),
+                    unique_paths.len(),
+                    "Each instance should have a unique path"
+                );
+
+                // Test exact search works for each instance
+                for channel in &duplicate_channels {
+                    let exact_match = mdf.search_channel_exact(
+                        &channel.name,
+                        channel.data_group,
+                        channel.channel_group,
+                    );
+                    assert!(
+                        exact_match.is_some(),
+                        "Should find exact match for {}",
+                        channel.full_path()
+                    );
+                    let found = exact_match.unwrap();
+                    assert_eq!(found.full_path(), channel.full_path());
+                }
+
+                // Count channels by data group
+                let mut channels_by_dg = std::collections::HashMap::new();
+                for channel in &duplicate_channels {
+                    *channels_by_dg.entry(channel.data_group).or_insert(0) += 1;
+                }
+
+                println!("\nDistribution across Data Groups:");
+                for (dg, count) in channels_by_dg.iter() {
+                    println!("  Data Group {}: {} instances", dg, count);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_mdf4_signal_reading() {
+        // Test smaller demo files first
+        for file in SMALL_DEMO_FILES.iter() {
+            let mut mdf = MDF::new(file);
+            mdf.read_all();
+            let channels = mdf.channels();
+
+            if let Some(first_channel) = channels.first() {
+                let channel = mdf.search_channel_first(&first_channel.name).unwrap();
+                let signal = mdf.read_channel(&channel);
+                assert!(
+                    !signal.samples.is_empty(),
+                    "Signal samples should not be empty for {} in {}",
+                    first_channel.name,
+                    file
+                );
+                println!(
+                    "Successfully read {} samples from channel {} in {}",
+                    signal.samples.len(),
+                    first_channel.name,
+                    file
+                );
+            } else {
+                panic!("No channels found in {}", file);
+            }
+        }
+    }
 }

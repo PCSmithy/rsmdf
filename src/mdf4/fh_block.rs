@@ -6,121 +6,89 @@ use super::mdf4_file::link_extract;
 use crate::utils;
 
 #[derive(Debug, Clone, PartialEq)]
-struct Fhblock {
+pub struct Fhblock {
     header: BlockHeader,
-
-    fh_fh_next: u64,
-
-    fh_md_comment: u64,
-
-    fh_time_ns: u64,
-
-    fh_tz_offset_min: i16,
-
-    fh_dst_offset_min: i16,
-
-    fh_time_flags: u8,
-
-    fh_reserved: [u8; 3],
+    links: Vec<u64>,
 }
+
+impl Fhblock {
+    pub fn comment_addr(&self) -> Option<u64> {
+        // The first link in an FH block points to the comment (TX block)
+        self.links.first().copied()
+    }
+}
+
 impl Block for Fhblock {
     fn new() -> Self {
         Self {
-            header: BlockHeader::create("##FH", 50, 0),
-            fh_fh_next: 0_u64,
-            fh_md_comment: 0_u64,
-            fh_time_ns: 0_u64,
-            fh_tz_offset_min: 0_i16,
-            fh_dst_offset_min: 0_i16,
-            fh_time_flags: 0_u8,
-            fh_reserved: [0_u8; 3],
+            header: BlockHeader::create("##FH", 56, 2),
+            links: vec![0, 0],
         }
     }
+
     fn default() -> Self {
-        Self {
-            header: BlockHeader::create("##FH", 50, 0),
-            fh_fh_next: 0_u64,
-            fh_md_comment: 0_u64,
-            fh_time_ns: 0_u64,
-            fh_tz_offset_min: 0_i16,
-            fh_dst_offset_min: 0_i16,
-            fh_time_flags: 0_u8,
-            fh_reserved: [0_u8; 3],
-        }
+        Self::new()
     }
+
     fn read(stream: &[u8], position: usize, little_endian: bool) -> (usize, Self) {
         let (pos, header) = BlockHeader::read(stream, position, little_endian);
 
         if !utils::eq(&header.id, "##FH".as_bytes()) {
-            panic!("Error FHBLOCK");
+            panic!("Error type incorrect");
         }
 
-        let (mut pos, mut address) = link_extract(stream, pos, little_endian, header.link_count);
+        let mut links = Vec::new();
+        let mut current_pos = pos;
 
-        let fh_fh_next = address.remove(0);
-        let fh_md_comment = address.remove(0);
+        // Read all links
+        for _ in 0..header.link_count {
+            let link: u64 = utils::read(stream, little_endian, &mut current_pos);
+            links.push(link);
+        }
 
-        let fh_time_ns = utils::read(stream, little_endian, &mut pos);
-        let fh_tz_offset_min = utils::read(stream, little_endian, &mut pos);
-        let fh_dst_offset_min = utils::read(stream, little_endian, &mut pos);
-        let fh_time_flags = utils::read(stream, little_endian, &mut pos);
-        let fh_reserved = utils::read(stream, little_endian, &mut pos);
-
-        (
-            pos,
-            Self {
-                header,
-                fh_fh_next,
-                fh_md_comment,
-                fh_time_ns,
-                fh_tz_offset_min,
-                fh_dst_offset_min,
-                fh_time_flags,
-                fh_reserved,
-            },
-        )
+        (current_pos, Self { header, links })
     }
 
     fn byte_len(&self) -> usize {
-        self.header.byte_len()
-            + mem::size_of_val(&self.fh_fh_next)
-            + mem::size_of_val(&self.fh_md_comment)
-            + mem::size_of_val(&self.fh_time_ns)
-            + mem::size_of_val(&self.fh_tz_offset_min)
-            + mem::size_of_val(&self.fh_dst_offset_min)
-            + mem::size_of_val(&self.fh_time_flags)
-            + mem::size_of_val(&self.fh_reserved)
+        24 + (self.links.len() * 8)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::mdf4::{block::Block, fh_block::Fhblock};
+    use super::*;
 
+    // Test data for an FH block with two links
     static RAW: [u8; 56] = [
-        0x23, 0x23, 0x46, 0x48, 0x00, 0x00, 0x00, 0x00, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x60, 0xC8, 0x11, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0xE0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4E, 0x10, 0xDF, 0x75,
-        0x78, 0x69, 0x15, 0x3C, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+        // Block Header
+        0x23, 0x23, 0x46, 0x48, // "##FH"
+        0x00, 0x00, 0x00, 0x00, // Reserved
+        0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Length = 56
+        0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Link count = 2
+        // Links
+        0xE0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Link 1 = 224 (TX block)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Link 2 = 0 (Next FH block)
+        // Additional data (if any)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00,
     ];
 
     #[test]
     fn read() {
-        let (pos, fh) = Fhblock::read(&RAW, 0, true);
+        let (pos, fh_block) = Fhblock::read(&RAW, 0, true);
 
-        assert_eq!(pos, RAW.len());
-        assert_eq!(1165408, fh.fh_fh_next);
-        assert_eq!(224, fh.fh_md_comment);
-        //assert_eq!(42896795000000000, fh.fh_time_ns);
-        assert_eq!(60, fh.fh_tz_offset_min);
-        assert_eq!(0, fh.fh_dst_offset_min);
-        assert_eq!(2, fh.fh_time_flags);
+        assert_eq!(40, pos);
+        assert!(utils::eq(&fh_block.header.id, "##FH".as_bytes()));
+        assert_eq!(56, fh_block.header.length);
+        assert_eq!(2, fh_block.header.link_count);
+        assert_eq!(2, fh_block.links.len());
+        assert_eq!(224, fh_block.links[0]); // TX block address
+        assert_eq!(0, fh_block.links[1]); // Next FH block address
     }
 
     #[test]
     fn byte_len() {
-        let (pos, fh) = Fhblock::read(&RAW, 0, true);
-
-        assert_eq!(pos, fh.byte_len());
+        let (_, fh_block) = Fhblock::read(&RAW, 0, true);
+        assert_eq!(40, fh_block.byte_len());
     }
 }

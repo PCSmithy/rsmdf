@@ -32,33 +32,6 @@ impl LinkedBlock for Dgblock {
             Some(block)
         }
     }
-    fn list(&self, stream: &[u8], little_endian: bool) -> Vec<Self> {
-        let mut all = Vec::new();
-
-        let next = self.next(stream, little_endian);
-
-        all.push(self.clone());
-        match next {
-            None => {}
-            Some(block) => all.append(&mut block.list(stream, little_endian)),
-        }
-
-        all
-
-        // let next_block = self;
-
-        // all.push(self.clone());
-        // loop {
-        //     let next_block = next_block.next(stream, little_endian);
-
-        //     match next_block {
-        //         Some(block) => all.push(block.clone()),
-        //         None => break,
-        //     }
-        // }
-
-        // all
-    }
 }
 
 impl Dgblock {

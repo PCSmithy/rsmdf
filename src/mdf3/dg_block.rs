@@ -117,7 +117,7 @@ impl Dgblock {
         let data_length = self.data_length(channel);
         let data_block = self.data_block as usize;
 
-        stream[data_block..data_block+data_length].to_vec()
+        stream[data_block..data_block + data_length].to_vec()
     }
 
     #[allow(dead_code)]
@@ -143,7 +143,7 @@ impl Dgblock {
         first_group.list(stream, little_endian)
     }
 
-    fn data_length(self, channel: &Cgblock) -> usize{
+    fn data_length(self, channel: &Cgblock) -> usize {
         let record_number = channel.record_number();
         let record_size = channel.record_size();
         record_number * record_size

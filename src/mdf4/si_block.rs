@@ -10,13 +10,13 @@ use super::mdf4_file::link_extract;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Siblock {
     header: BlockHeader,
-    si_tx_name: u64,
-    si_tx_path: u64,
-    si_md_comment: u64,
-    si_type: SourceType,
-    si_bus_type: BusType,
-    si_flags: u8,
-    si_reserved: [u8; 5],
+    pub si_tx_name: u64,
+    pub si_tx_path: u64,
+    pub si_md_comment: u64,
+    pub si_type: SourceType,
+    pub si_bus_type: BusType,
+    pub si_flags: u8,
+    pub si_reserved: [u8; 5],
 }
 impl Block for Siblock {
     fn new() -> Self {
@@ -119,6 +119,43 @@ mod tests {
         assert_eq!(BusType::Other, si.si_bus_type);
         assert_eq!(0, si.si_flags);
         assert!(utils::eq(&si.si_reserved, &[0_u8; 5]));
+    }
+
+    #[test]
+    fn test_bus_type_parsing() {
+        // Create a template SI block with default values
+        let mut raw = RAW.clone();
+
+        // The bus type byte is at offset 49 in the raw data
+        let bus_type_offset = 49;
+
+        // Test all bus types
+        let test_cases = vec![
+            (0, BusType::None),
+            (1, BusType::Other),
+            (2, BusType::Can),
+            (3, BusType::Lin),
+            (4, BusType::Most),
+            (5, BusType::FlexRay),
+            (6, BusType::KLine),
+            (7, BusType::Ethernet),
+            (8, BusType::Usb),
+        ];
+
+        for (value, expected_type) in test_cases {
+            // Modify the bus type byte in the raw data
+            raw[bus_type_offset] = value;
+
+            // Parse the modified raw data
+            let (_, si) = Siblock::read(&raw, 0, true);
+
+            // Verify the parsed bus type matches the expected type
+            assert_eq!(
+                si.si_bus_type, expected_type,
+                "Failed to parse bus type value {} as {:?}",
+                value, expected_type
+            );
+        }
     }
 
     #[test]
