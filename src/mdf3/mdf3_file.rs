@@ -234,6 +234,7 @@ pub fn print_record(value: Record) {
         Record::Float32(number) => print!("{}", number),
         Record::Float64(number) => print!("{}", number),
         Record::StringNullTerm(string) => print!("{}", string),
+        Record::ByteArray(bytes) => print!("{:?}", bytes),
         // _ => panic!("Help!")
     };
 }

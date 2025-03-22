@@ -144,8 +144,8 @@ pub fn _print_record(value: Record) {
         Record::Float32(number) => print!("{}", number),
         Record::Float64(number) => print!("{}", number),
         Record::StringNullTerm(string) => print!("{}", string),
-        // _ => panic!("Help!")
-    };
+        Record::ByteArray(bytes) => print!("{:?}", bytes),
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -155,6 +155,7 @@ pub enum Record {
     Float32(f32),
     Float64(f64),
     StringNullTerm(String),
+    ByteArray(Vec<u8>),
 }
 
 impl Record {
@@ -165,6 +166,7 @@ impl Record {
             DataType::Float32 => Self::float32(stream, dtype),
             DataType::Float64 => Self::float64(stream, dtype),
             DataType::StringNullTerm => Self::string_null_term(stream, dtype),
+            DataType::ByteArray => Self::byte_array(stream, dtype),
             _ => panic!("Incorrect or not implemented type!, {:?}", dtype.data_type),
         }
     }
@@ -176,6 +178,7 @@ impl Record {
             Record::Float32(number) => *number as f64,
             Record::Float64(number) => *number as f64,
             Record::StringNullTerm(string) => string.parse::<f64>().unwrap(),
+            Record::ByteArray(bytes) => bytes[0] as f64,
         }
     }
 
@@ -209,5 +212,9 @@ impl Record {
     fn float64(stream: &[u8], dtype: DataTypeRead) -> Self {
         let records: f64 = utils::read(stream, dtype.little_endian, &mut 0);
         Self::Float64(records)
+    }
+
+    fn byte_array(stream: &[u8], _dtype: DataTypeRead) -> Self {
+        Self::ByteArray(stream.to_vec())
     }
 }

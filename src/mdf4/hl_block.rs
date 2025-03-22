@@ -1,9 +1,11 @@
 use crate::utils;
 
-use super::block::Block;
+use super::block::{Block, LinkedBlock, DataBlock};
 use super::block_header::*;
 use super::mdf4_enums::ZipType;
 use super::mdf4_file::link_extract;
+use super::data_block::DataBlockType;
+use super::dl_block::Dlblock;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hlblock {
@@ -16,6 +18,27 @@ pub struct Hlblock {
     hl_zip_type: ZipType,
     hl_reserved: [u8; 5],
 }
+
+impl Hlblock {
+    pub fn read_data(&self, stream: &[u8], little_endian: bool) -> Vec<u8> {
+        let mut data = Vec::new();
+        
+        // Read the first DL block
+        let (_pos, dl_block) = Dlblock::read(stream, self.hl_dl_first as usize, little_endian);
+        
+        // Get all DL blocks in the list
+        let dl_blocks = dl_block.list(stream, little_endian);
+        
+        // Process each DL block
+        for dl in dl_blocks {
+            let block_data = dl.data_array(stream, little_endian);
+            data.extend_from_slice(&block_data);
+        }
+        
+        data
+    }
+}
+
 impl Block for Hlblock {
     fn new() -> Self {
         Self {

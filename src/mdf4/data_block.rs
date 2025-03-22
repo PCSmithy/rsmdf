@@ -42,8 +42,7 @@ impl DataBlockType {
             },
             Self::HList(block) => {
                 println!("Reading from HL block (hierarchical list)");
-                // TODO: Implement data_array for Hlblock
-                Vec::new()
+                block.read_data(stream, little_endian)
             }
         }
     }
