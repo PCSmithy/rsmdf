@@ -45,8 +45,18 @@ impl Dgblock {
     }
 
     pub fn read_data(&self, stream: &[u8], little_endian: bool) -> Vec<u8> {
-        let data_block = DataBlockType::read(stream, self.data_location(), little_endian);
-        data_block.data_array(stream, little_endian)
+        // Check if data location is valid
+        let data_location = self.data_location();
+        if data_location == 0 || data_location >= stream.len() {
+            println!("Invalid data location: {}", data_location);
+            return Vec::new();
+        }
+
+        println!("Reading data from location: {}", data_location);
+        let data_block = DataBlockType::read(stream, data_location, little_endian);
+        let data = data_block.data_array(stream, little_endian);
+        println!("Read {} bytes of data", data.len());
+        data
     }
 
     // pub fn read_all(stream: &[u8], position: usize, little_endian: bool) -> Vec<Self> {

@@ -309,9 +309,20 @@ impl MDFFile for MDF4 {
         _datagroup: usize,
         channel_grp: usize,
     ) -> Result<usize, &'static str> {
+        // Check if channel group exists
+        if channel_grp >= self.channel_groups.len() {
+            return Err("Channel group index out of bounds");
+        }
+
         let channel_group = self.channel_groups[channel_grp]
             .clone()
             .channels(&self.file, self.little_endian);
+
+        // Check if there are any channels
+        if channel_group.is_empty() {
+            return Err("No channels in the channel group");
+        }
+
         for (i, channel) in channel_group.iter().enumerate() {
             if matches!(channel.channel_type(), ChannelType::Master) {
                 return Ok(i);
@@ -322,47 +333,69 @@ impl MDFFile for MDF4 {
     }
 
     fn read_channel(&self, datagroup: usize, channel_grp: usize, channel: usize) -> Vec<Record> {
+        // Check if datagroup exists
+        if datagroup >= self.data_groups.len() {
+            println!("Debug: Datagroup index {} out of bounds (max {})", datagroup, self.data_groups.len());
+            return Vec::new();
+        }
+
         let dg = &self.data_groups[datagroup];
         let channel_groups = dg
             .first(&self.file, self.little_endian)
             .list(&self.file, self.little_endian);
 
+        // Check if channel group exists
+        if channel_grp >= channel_groups.len() {
+            println!("Debug: Channel group index {} out of bounds (max {})", channel_grp, channel_groups.len());
+            return Vec::new();
+        }
+
         let channel_group = &channel_groups[channel_grp];
         let channels = channel_group
             .first(&self.file, self.little_endian)
             .list(&self.file, self.little_endian);
+
+        // Check if channel exists
+        if channel >= channels.len() {
+            println!("Debug: Channel index {} out of bounds (max {})", channel, channels.len());
+            return Vec::new();
+        }
+
         let cn = &channels[channel];
-
         let data = dg.read_data(&self.file, self.little_endian);
-
-        let mut data_blocks: Vec<&[u8]> = vec![&[0_u8]; channel_group.record_number()];
-
-        for (i, db) in data_blocks.iter_mut().enumerate() {
-            *db = &data[(i * channel_group.record_size())..((i + 1) * channel_group.record_size())];
+        
+        // Return empty vector if there are no records or no data
+        if channel_group.record_number() == 0 {
+            println!("Debug: No records in channel group");
+            return Vec::new();
+        }
+        if data.is_empty() {
+            println!("Debug: No data read from data group");
+            return Vec::new();
         }
 
+        let record_size = channel_group.record_size();
         let byte_offset = cn.byte_offset();
+        let data_type_len = cn.data_type_len();
 
-        let mut records = Vec::new();
-        let mut pos = 0;
-        for _i in 0..channel_group.record_number() {
-            records.push(&data[pos..pos + channel_group.record_size()]);
-            pos += channel_group.record_size();
+        // Ensure we have enough data for at least one record
+        if data.len() < record_size {
+            println!("Debug: Data length {} less than record size {}", data.len(), record_size);
+            return Vec::new();
         }
 
-        let mut raw_data = Vec::new();
-        let end = byte_offset + cn.data_type_len();
-
-        for rec in records {
-            raw_data.push(&rec[byte_offset..end]);
+        let mut records = Vec::with_capacity(channel_group.record_number());
+        
+        // Split data into records and extract the channel data from each record
+        for chunk in data.chunks(record_size) {
+            if chunk.len() >= record_size && (byte_offset + data_type_len) <= chunk.len() {
+                let raw_data = &chunk[byte_offset..byte_offset + data_type_len];
+                records.push(Record::new(raw_data, cn.data_type().copy_to_data_type_read()));
+            }
         }
 
-        let mut extracted_data = Vec::new();
-        for raw in raw_data {
-            extracted_data.push(Record::new(raw, cn.data_type().copy_to_data_type_read()));
-        }
-
-        extracted_data
+        println!("Debug: Read {} records", records.len());
+        records
     }
 
     #[must_use]
@@ -486,15 +519,41 @@ impl MDFFile for MDF4 {
     #[must_use]
     fn read(&self, datagroup: usize, channel_grp: usize, channel: usize) -> Signal {
         let time_channel = self.find_time_channel(datagroup, channel_grp);
-        let time_channel = match time_channel {
-            Ok(x) => x,
-            Err(e) => panic!("{}", e),
+        let time = match time_channel {
+            Ok(time_channel) => self.read_channel(datagroup, channel_grp, time_channel),
+            Err(_) => Vec::new(), // Return empty time vector if no time channel found
         };
-        let time = self.read_channel(datagroup, channel_grp, time_channel);
         let some = self.read_channel(datagroup, channel_grp, channel);
 
+        // If either time or data is empty, return an empty signal
+        if time.is_empty() || some.is_empty() {
+            return signal::Signal::new(
+                Vec::new(),
+                Vec::new(),
+                "Unit".to_string(),
+                "Measurement".to_string(),
+                "No data available".to_string(),
+                false,
+            );
+        }
+
+        // Extract values from records
+        let time_values: Vec<f64> = time.iter().map(|x| x.extract()).collect();
+
+        // Check if we have valid data after extraction
+        if time_values.is_empty() {
+            return signal::Signal::new(
+                Vec::new(),
+                Vec::new(),
+                "Unit".to_string(),
+                "Measurement".to_string(),
+                "No data available after extraction".to_string(),
+                false,
+            );
+        }
+
         signal::Signal::new(
-            time.iter().map(|x| x.extract()).collect(),
+            time_values,
             some,
             "Unit".to_string(),
             "Measurement".to_string(),

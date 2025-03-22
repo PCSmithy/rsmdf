@@ -152,8 +152,8 @@ impl Signal {
     }
 
     #[must_use]
-    pub fn max_time(&self) -> f64 {
-        *self.timestamps.last().expect("No time value found")
+    pub fn max_time(&self) -> Option<f64> {
+        self.timestamps.last().copied()
     }
 }
 

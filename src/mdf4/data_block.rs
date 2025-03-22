@@ -4,29 +4,46 @@ use super::{
     dl_block::Dlblock,
     dt_block::Dtblock,
     dz_block::Dzblock,
+    hl_block::Hlblock,
 };
 
 pub enum DataBlockType {
     Block(Dtblock),
     BlockComp(Dzblock),
     List(Dlblock),
+    HList(Hlblock),
 }
 
 impl DataBlockType {
     pub fn data_array(&self, stream: &[u8], little_endian: bool) -> Vec<u8> {
         match self {
-            Self::Block(block) => block.data_array(stream, little_endian),
-            Self::BlockComp(block) => block.data_array(stream, little_endian),
+            Self::Block(block) => {
+                println!("Reading from DT block");
+                block.data_array(stream, little_endian)
+            },
+            Self::BlockComp(block) => {
+                println!("Reading from DZ block (compressed)");
+                block.data_array(stream, little_endian)
+            },
             Self::List(block) => {
+                println!("Reading from DL block (list)");
                 let dl_list = block.list(stream, little_endian);
+                println!("Found {} blocks in list", dl_list.len());
 
                 let mut data = Vec::new();
 
-                for dl in dl_list {
-                    data.append(&mut dl.data_array(stream, little_endian));
+                for (i, dl) in dl_list.iter().enumerate() {
+                    let mut block_data = dl.data_array(stream, little_endian);
+                    println!("Block {} contains {} bytes", i, block_data.len());
+                    data.append(&mut block_data);
                 }
 
                 data
+            },
+            Self::HList(block) => {
+                println!("Reading from HL block (hierarchical list)");
+                // TODO: Implement data_array for Hlblock
+                Vec::new()
             }
         }
     }
@@ -47,7 +64,10 @@ impl DataBlockType {
                 let (_pos, block) = Dlblock::read(stream, position, little_endian);
                 Self::List(block)
             }
-            "##HL" => todo!(),
+            "##HL" => {
+                let (_pos, block) = Hlblock::read(stream, position, little_endian);
+                Self::HList(block)
+            }
             _ => panic!("Error: wrong block type for data block"),
         };
 

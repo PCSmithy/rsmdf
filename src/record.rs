@@ -192,25 +192,22 @@ impl Record {
     }
 
     fn unsigned_int(stream: &[u8], dtype: DataTypeRead) -> Self {
-        let records = utils::read(stream, dtype.little_endian, &mut 0);
-
+        let records: u8 = utils::read(stream, dtype.little_endian, &mut 0);
         Self::Uint(records)
     }
 
     fn signed_int(stream: &[u8], dtype: DataTypeRead) -> Self {
-        let records = utils::read(stream, dtype.little_endian, &mut 0);
-
+        let records: i8 = utils::read(stream, dtype.little_endian, &mut 0);
         Self::Int(records)
     }
 
     fn float32(stream: &[u8], dtype: DataTypeRead) -> Self {
-        let records = utils::read(stream, dtype.little_endian, &mut 0);
-
+        let records: f32 = utils::read(stream, dtype.little_endian, &mut 0);
         Self::Float32(records)
     }
-    fn float64(stream: &[u8], dtype: DataTypeRead) -> Self {
-        let records = utils::read(stream, dtype.little_endian, &mut 0);
 
+    fn float64(stream: &[u8], dtype: DataTypeRead) -> Self {
+        let records: f64 = utils::read(stream, dtype.little_endian, &mut 0);
         Self::Float64(records)
     }
 }

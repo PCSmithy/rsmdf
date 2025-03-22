@@ -222,11 +222,26 @@ impl MDF {
     }
 
     pub fn read_channel(&self, channel: &MdfChannel) -> Signal {
-        self.file.read(
+        // Check if the channel exists and has data
+        let signal = self.file.read(
             channel.data_group as usize,
             channel.channel_group as usize,
             channel.channel as usize,
-        )
+        );
+        
+        // If the signal has no data, return an empty signal
+        if signal.is_empty() {
+            Signal {
+                name: channel.name.clone(),
+                comment: String::new(),
+                unit: String::new(),
+                samples: Vec::new(),
+                timestamps: Vec::new(),
+                raw: false,
+            }
+        } else {
+            signal
+        }
     }
 
     pub fn get_source_information(
