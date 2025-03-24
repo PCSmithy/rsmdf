@@ -13,7 +13,7 @@ pub struct Chblock {
     ch_ch_first: u64,
     ch_tx_name: u64,
     ch_md_comment: u64,
-    ch_element: Vec<u64>,
+    pub ch_element: Vec<u64>,
     ch_element_count: u32,
     ch_type: ChannelHierarchyType,
 }

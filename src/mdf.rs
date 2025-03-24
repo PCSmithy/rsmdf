@@ -190,11 +190,13 @@ pub struct MDF {
 
 impl MDF {
     pub fn search_channels(&self, channel_name: &str) -> Vec<MdfChannel> {
-        self.channels
-            .iter()
-            .filter(|ch| ch.name.eq(channel_name))
-            .cloned()
-            .collect()
+        let mut results = Vec::new();
+        for channel in self.channels() {
+            if channel.name.contains(channel_name) {
+                results.push(channel);
+            }
+        }
+        results
     }
 
     pub fn search_channel_exact(&self, name: &str, dg: usize, cg: usize) -> Option<MdfChannel> {
@@ -414,6 +416,8 @@ pub struct MdfChannel {
     pub data_group: usize,
     pub channel_group: usize,
     pub channel: usize,
+    pub parent_name: Option<String>,
+    pub is_nested: bool,
 }
 
 impl MdfChannel {
@@ -422,6 +426,18 @@ impl MdfChannel {
             "/DG{}/CG{}/{}",
             self.data_group, self.channel_group, self.name
         )
+    }
+
+    pub fn full_name(&self) -> String {
+        if let Some(parent) = &self.parent_name {
+            format!("{}.{}", parent, self.name)
+        } else {
+            self.name.clone()
+        }
+    }
+
+    pub fn is_child_of(&self, parent_name: &str) -> bool {
+        self.parent_name.as_ref().map_or(false, |p| p == parent_name)
     }
 }
 
@@ -631,71 +647,56 @@ mod tests {
             mdf.read_all();
             let channels = mdf.channels();
 
-            // Find a channel name that appears multiple times
-            let mut duplicate_channels: Vec<MdfChannel> = Vec::new();
-            let mut duplicate_name = String::new();
-
+            // Create a map to track channel names and their occurrences
+            let mut channel_counts = std::collections::HashMap::new();
             for channel in &channels {
-                let matches = mdf.search_channels(&channel.name);
-                if matches.len() > 1 {
-                    duplicate_channels = matches;
-                    duplicate_name = channel.name.clone();
-                    break;
-                }
+                *channel_counts.entry(channel.name.clone()).or_insert(0) += 1;
             }
 
+            // Find channels that appear multiple times
+            let duplicate_channels: Vec<_> = channel_counts
+                .iter()
+                .filter(|(_name, count)| **count > 1)
+                .collect();
+
             if !duplicate_channels.is_empty() {
-                println!(
-                    "Found {} instances of channel '{}'",
-                    duplicate_channels.len(),
-                    duplicate_name
-                );
+                for (name, count) in &duplicate_channels {
+                    println!("\nFound {} instances of channel '{}'", count, name);
 
-                // Print details of first few instances
-                println!("\nFirst 5 instances:");
-                for channel in duplicate_channels.iter().take(5) {
-                    println!("  Path: {}", channel.full_path());
-                    println!("    Data Group: {}", channel.data_group);
-                    println!("    Channel Group: {}", channel.channel_group);
-                    println!("    Channel Index: {}", channel.channel);
-                }
+                    // Get all instances of this channel
+                    let instances = mdf.search_channels(name);
+                    assert_eq!(instances.len(), **count as usize, "Search should find all instances");
 
-                // Verify each instance has a unique path
-                let paths: Vec<String> =
-                    duplicate_channels.iter().map(|ch| ch.full_path()).collect();
-                let unique_paths: std::collections::HashSet<_> = paths.iter().collect();
-                assert_eq!(
-                    paths.len(),
-                    unique_paths.len(),
-                    "Each instance should have a unique path"
-                );
-
-                // Test exact search works for each instance
-                for channel in &duplicate_channels {
-                    let exact_match = mdf.search_channel_exact(
-                        &channel.name,
-                        channel.data_group,
-                        channel.channel_group,
+                    // Verify each instance has a unique full path
+                    let paths: Vec<String> = instances.iter().map(|ch| ch.full_path()).collect();
+                    let unique_paths: std::collections::HashSet<_> = paths.iter().collect();
+                    assert_eq!(
+                        paths.len(),
+                        unique_paths.len(),
+                        "Each instance should have a unique path"
                     );
-                    assert!(
-                        exact_match.is_some(),
-                        "Should find exact match for {}",
-                        channel.full_path()
-                    );
-                    let found = exact_match.unwrap();
-                    assert_eq!(found.full_path(), channel.full_path());
-                }
 
-                // Count channels by data group
-                let mut channels_by_dg = std::collections::HashMap::new();
-                for channel in &duplicate_channels {
-                    *channels_by_dg.entry(channel.data_group).or_insert(0) += 1;
+                    // Test exact search works for each instance
+                    for channel in &instances {
+                        let exact_match = mdf.search_channel_exact(
+                            &channel.name,
+                            channel.data_group,
+                            channel.channel_group,
+                        );
+                        assert!(
+                            exact_match.is_some(),
+                            "Should find exact match for {}",
+                            channel.full_path()
+                        );
+                        let found = exact_match.unwrap();
+                        assert_eq!(found.full_path(), channel.full_path());
+                        assert_eq!(found.data_group, channel.data_group);
+                        assert_eq!(found.channel_group, channel.channel_group);
+                        assert_eq!(found.channel, channel.channel);
+                    }
                 }
-
-                println!("\nDistribution across Data Groups:");
-                for (dg, count) in channels_by_dg.iter() {
-                    println!("  Data Group {}: {} instances", dg, count);
-                }
+            } else {
+                println!("\nNo duplicate channels found in {}", file);
             }
         }
     }
@@ -728,4 +729,5 @@ mod tests {
             }
         }
     }
+
 }

@@ -5,25 +5,26 @@ use rsmdf::{mdf::MDFFile, mdf::MDF};
 fn main() {
     let mdf = MDF::new("./example_files/ASAP2_Demo_V171_deflate.mf4");
 
+    // mdf.list_data_groups();
     mdf.list_channels();
 
     let start = Instant::now();
-    // let test = mdf.read(0, 0, 1);
-
-    // let channel = mdf.search_channels("ASAM.M.SCALAR.SBYTE.IDENTICAL.DISCRETE");
-    // let channel = match channel {
-    //     Ok(x) => x,
-    //     Err(e) => panic!("{}", e),
-    // };
-    // let test = mdf.read_channel(channel);
-
-    for channel in &mdf.channels() {
-        let test = &mdf.read_channel(channel);
-        println!("{}", test.comment);
+    
+    // Only try to read channels if there are any
+    if !mdf.channels.is_empty() {
+        for channel in &mdf.channels {
+            let signal = mdf.read_channel(&channel);
+            println!("Channel: {}", channel.name);
+            println!("  Comment: {}", signal.comment);
+            match signal.max_time() {
+                Some(max_time) => println!("  Max Time: {}", max_time),
+                None => println!("  Max Time: No data available"),
+            }
+            println!();  // Add a blank line between channels for better readability
+        }
+    } else {
+        println!("No channels found in the MDF file");
     }
 
-    let test = mdf.read_channel(&mdf.channels[0]);
-
-    println!("Max Time: {}", test.max_time());
     println!("Took: {:?}", start.elapsed());
 }

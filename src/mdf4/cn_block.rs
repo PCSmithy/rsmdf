@@ -15,11 +15,9 @@ use super::{
 pub struct Cnblock {
     header: BlockHeader,
     #[allow(dead_code)]
-    cn_cn_next: u64, //next ATBLOCK address
-    #[allow(dead_code)]
-    cn_composition: u64,
-    #[allow(dead_code)]
-    cn_tx_name: u64, //address of TXBLOCK that contains the channel name
+    pub cn_cn_next: u64, //next ATBLOCK address
+    pub cn_composition: u64,
+    pub cn_tx_name: u64, //address of TXBLOCK that contains the channel name
     pub cn_si_source: u64, //address of channel source block
     #[allow(dead_code)]
     cn_cc_conversion: u64, //address of channel conversion block
@@ -117,18 +115,31 @@ impl Cnblock {
         self.data_type.len()
     }
 
-    pub fn comment(self, stream: &[u8], little_endian: bool) -> String {
-        let mut name = "".to_string();
-
-        if matches!(self.channel_type, ChannelType::Master) {
-            name = "time".to_string();
-        } else if self.cn_tx_name != 0 {
-            let (_pos, tx) = Txblock::read(stream, self.cn_tx_name as usize, little_endian);
-
-            name = tx.text();
+    pub fn comment(&self, stream: &[u8], little_endian: bool) -> String {
+        if self.cn_md_comment == 0 {
+            return String::new();
         }
 
-        name
+        // Try to read the block header to determine its type
+        let (_pos, header) = BlockHeader::read(stream, self.cn_md_comment as usize, little_endian);
+        
+        match &header.id {
+            b"##TX" => {
+                if let Ok((_pos, tx_block)) = Txblock::try_read(stream, self.cn_md_comment as usize, little_endian) {
+                    tx_block.text()
+                } else {
+                    String::new()
+                }
+            }
+            b"##MD" => {
+                let (_pos, md_block) = super::md_block::Mdblock::read(stream, self.cn_md_comment as usize, little_endian);
+                md_block.text()
+            }
+            _ => {
+                println!("Warning: Unknown metadata block type: {:?}", String::from_utf8_lossy(&header.id));
+                String::new()
+            }
+        }
     }
 
     pub fn channel_type(&self) -> ChannelType {

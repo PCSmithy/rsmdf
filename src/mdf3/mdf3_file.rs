@@ -51,7 +51,9 @@ impl mdf::MDFFile for MDF3 {
                         data_group: dg_no,
                         channel_group: cg_no,
                         channel: cn_no,
-                    })
+                        is_nested: false,
+                        parent_name: None,
+                    });
                 }
             }
         }

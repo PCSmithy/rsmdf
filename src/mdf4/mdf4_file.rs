@@ -271,14 +271,12 @@ impl MDF4 {
 impl MDFFile for MDF4 {
     fn channels(&self) -> Vec<MdfChannel> {
         let mut mdf_channels = Vec::new();
-
         let little_endian = true;
 
         let (position, _id_block) = Idblock::read(&self.file, 0, little_endian);
         let (_pos, hd_block) = Hdblock::read(&self.file, position, little_endian);
 
         let next_dg = hd_block.first_data_group(&self.file, little_endian);
-
         let data_groups = next_dg.list(&self.file, little_endian);
 
         for (dg_no, dg) in data_groups.iter().enumerate() {
@@ -290,13 +288,140 @@ impl MDFFile for MDF4 {
                 let channels = first_cn.list(&self.file, little_endian);
 
                 for (cn_no, cn) in channels.iter().enumerate() {
-                    let name = cn.clone().comment(&self.file, little_endian);
+                    // Get the channel name from the TX name block
+                    let name = if cn.cn_tx_name != 0 {
+                        let (_, tx_block) = Txblock::read(&self.file, cn.cn_tx_name as usize, little_endian);
+                        tx_block.text()
+                    } else {
+                        // Fallback to comment if no name block
+                        cn.clone().comment(&self.file, little_endian)
+                    };
+                    
+                    // Add the main channel
                     mdf_channels.push(mdf::MdfChannel {
-                        name,
+                        name: name.clone(),
                         data_group: dg_no,
                         channel_group: cg_no,
                         channel: cn_no,
-                    })
+                        parent_name: None,
+                        is_nested: false,
+                    });
+
+                    // Check if this channel has a composition (nested channels)
+                    if cn.cn_composition != 0 {
+                        // Read the block header first to determine the block type
+                        let (_pos, header) = super::block_header::BlockHeader::read(
+                            &self.file, 
+                            cn.cn_composition as usize, 
+                            little_endian
+                        );
+                        
+                        if utils::eq(&header.id, "##CH".as_bytes()) {
+                            // Case: CH block composition
+                            let (_, ch_block) = super::ch_block::Chblock::read(
+                                &self.file, 
+                                cn.cn_composition as usize, 
+                                little_endian
+                            );
+                            
+                            // Process each element in the composition
+                            // Each element is a triplet of [reference, min_value, max_value]
+                            for chunk_index in 0..(ch_block.ch_element.len() / 3) {
+                                let base_index = chunk_index * 3;
+                                if base_index + 2 < ch_block.ch_element.len() {
+                                    let cn_reference = ch_block.ch_element[base_index];
+                                    
+                                    // If the reference is non-zero, process the nested channel
+                                    if cn_reference != 0 {
+                                        let (_, nested_cn) = Cnblock::read(
+                                            &self.file, 
+                                            cn_reference as usize, 
+                                            little_endian
+                                        );
+                                        
+                                        // Get the nested channel name from TX name block
+                                        let nested_name = if nested_cn.cn_tx_name != 0 {
+                                            let (_, tx_block) = Txblock::read(&self.file, nested_cn.cn_tx_name as usize, little_endian);
+                                            tx_block.text()
+                                        } else {
+                                            // Fallback to comment if no name block
+                                            nested_cn.clone().comment(&self.file, little_endian)
+                                        };
+                                        
+                                        // Add the nested channel with parent information
+                                        mdf_channels.push(mdf::MdfChannel {
+                                            name: nested_name,
+                                            data_group: dg_no,
+                                            channel_group: cg_no, 
+                                            channel: cn_no,
+                                            parent_name: Some(name.clone()),
+                                            is_nested: true,
+                                        });
+                                    }
+                                }
+                            }
+                        } else if utils::eq(&header.id, "##CN".as_bytes()) {
+                            // Case: CN block composition - direct reference to a CN block
+                            // This appears to be how the LIN frameState channels are structured
+                            
+                            // Read the first CN block in the composition chain
+                            let (_, comp_cn) = Cnblock::read(
+                                &self.file, 
+                                cn.cn_composition as usize, 
+                                little_endian
+                            );
+                            
+                            // Get the nested channels by following the CN block chain
+                            let mut current_cn = comp_cn;
+                            
+                            // Process the first CN block
+                            let nested_name = if current_cn.cn_tx_name != 0 {
+                                let (_, tx_block) = Txblock::read(&self.file, current_cn.cn_tx_name as usize, little_endian);
+                                tx_block.text()
+                            } else {
+                                current_cn.clone().comment(&self.file, little_endian)
+                            };
+                            
+                            // Add this nested channel
+                            mdf_channels.push(mdf::MdfChannel {
+                                name: nested_name,
+                                data_group: dg_no,
+                                channel_group: cg_no,
+                                channel: cn_no,
+                                parent_name: Some(name.clone()),
+                                is_nested: true,
+                            });
+                            
+                            // Then follow the chain of linked CN blocks
+                            while current_cn.cn_cn_next != 0 {
+                                let (_, next_cn) = Cnblock::read(
+                                    &self.file, 
+                                    current_cn.cn_cn_next as usize, 
+                                    little_endian
+                                );
+                                
+                                current_cn = next_cn;
+                                
+                                // Get the name of this nested channel
+                                let nested_name = if current_cn.cn_tx_name != 0 {
+                                    let (_, tx_block) = Txblock::read(&self.file, current_cn.cn_tx_name as usize, little_endian);
+                                    tx_block.text()
+                                } else {
+                                    current_cn.clone().comment(&self.file, little_endian)
+                                };
+                                
+                                // Add this nested channel
+                                mdf_channels.push(mdf::MdfChannel {
+                                    name: nested_name,
+                                    data_group: dg_no,
+                                    channel_group: cg_no,
+                                    channel: cn_no,
+                                    parent_name: Some(name.clone()),
+                                    is_nested: true,
+                                });
+                            }
+                        }
+                    }
                 }
             }
         }
